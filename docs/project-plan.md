@@ -1,0 +1,152 @@
+# Approval Service Project Plan
+
+Status: Draft  
+Last Updated: 2025-09-19
+
+## 1. Overview
+This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
+
+## 2. Phased Roadmap (Suggested Order)
+1. Core Hardening (Auth + Approvals) – Items 1–3, 8
+2. Persistence & Lifecycle – Items 4–6
+3. Experience & Delivery – Items 7, 9
+4. Observability & Compliance – Items 10–13
+5. Deployment & Operations – Items 14–17
+6. Documentation & Polish – Item 18
+
+## 3. Backlog (Work Items)
+| ID | Title | Description | Depends On | Phase | Exit Criteria |
+|----|-------|-------------|------------|-------|---------------|
+| 1 | Enforce approver allowlists | Only allow listed Slack IDs / superApprovers to approve/deny; persist approver IDs | — | 1 | Unauthorized user attempt rejected & logged |
+| 2 | Distinct multi-approval tracking | Track unique approvers; prevent duplicates; expose approvers array | 1 | 1 | `wait` response shows unique list; duplicates ignored |
+| 3 | Persona acknowledgment interactions | Add checklist & gating; disable Approve until all personas ack | 1 | 1 | Approve button disabled until personas ack state reached |
+| 4 | Redis persistence adapter | Replace in-memory store; TTL for pending; env `REDIS_URL` | 1 | 2 | All CRUD via Redis; restart doesn’t lose active requests |
+| 5 | Timeout & escalation scheduler | Worker to expire & escalate; post updates | 4 | 2 | Expired requests visible & escalations logged |
+| 6 | Re-request lineage & rate limiting | `lineage_id` + cooldown & per-lineage limits | 4 | 2 | Re-request button creates new request with lineage chain |
+| 7 | SSE streaming endpoint | Real-time state push; heartbeat; polling fallback | 1 | 3 | Open connection receives state transitions instantly |
+| 8 | Security hardening | Slack timestamp skew, replay guard, rate limits, mTLS option | 1 | 1 | All security tests pass; stale signatures rejected |
+| 9 | Parameter override modal | Slack modal for Approve with edits; validate & merge | 2 | 3 | Edited params reflected in final decision payload |
+|10 | Audit log persistence backend | Durable sink (file/Redis Stream); export tool | 4 | 4 | `audit export` returns filtered events |
+|11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible |
+|12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green |
+|13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues |
+|14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image published & manifests deploy locally |
+|15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push |
+|16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned |
+|17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed |
+|18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged |
+
+## 4. Detailed Work Item Notes
+### Item 1 – Enforce approver allowlists
+Add runtime guard in interaction handler; ephemeral rejection for non-authorized; audit event `unauthorized_attempt`.
+
+### Item 3 – Persona Interactions
+Render dynamic checkbox block; each ack triggers state evaluation; only when all = ack, enable Approve buttons (or add them). Optionally show partial progress.
+
+### Item 5 – Timeout & Escalation
+Scheduler interval: 30s. Escalation threshold: `expires_at - escalation.afterSec`. Escalation message posted once (`escalated=true`). Expiration posts status update & disables action buttons.
+
+### Item 7 – SSE Endpoint
+URL: `GET /api/guard/wait-sse?token=...`. Events: `state`, `heartbeat`. Close connection on terminal states.
+
+### Item 8 – Security Hardening
+* Reject if `abs(now - slack_timestamp) > 300s`.
+* Store signature hash in Redis TTL set (5m) to block replay.
+* Global rate limit (token bucket) per IP for `/api/guard/request`.
+* Optional mTLS: env `REQUIRE_CLIENT_CERT=true` + Node HTTPS server config.
+
+### Item 9 – Parameter Override Modal
+Slack `views.open` on `approve_with_edits` button; JSON form limited to allowlist keys; validate via action schema registry (future `schemas/<action>.json`).
+
+### Item 10 – Audit Backend
+Strategy: Redis Stream `audit:events` (XADD) or append-only NDJSON file. Provide CLI export filter by time window + action + status.
+
+### Item 11 – Metrics
+Counters: `approval_requests_total{action}`, `approvals_total`, `denies_total`, `expired_total`, `escalations_total`.
+Histogram: `decision_latency_seconds` (record on terminal state). Gauge: `pending_requests`.
+
+### Item 12 – Test Suite Expansion
+Use Vitest + local Redis (test container). Mock Slack Web API via nock or internal stub.
+
+### Item 13 – Load Test
+Simple Node script or k6 scenario: 200 concurrent requests; random approve latency; measure decision time distribution.
+
+### Item 14 – Deployment Packaging
+Dockerfile multi-stage (`node:20-alpine` build → distroless runtime). Add health (`/healthz`) & readiness (`/readyz`) endpoints.
+
+### Item 15 – CI/CD
+Jobs: `lint`, `typecheck`, `unit`, `integration-redis`, `build-image`, `scan` (trivy), `publish` (on tag). Cache node_modules with hash of lockfile.
+
+### Item 16 – Runbook Sections
+1. Secrets rotation steps.
+2. Policy reload procedure.
+3. Redis failover verification.
+4. Approval latency SLO investigation.
+5. Slack outage / degraded mode (queue requests; poll fallback).
+
+### Item 17 – Production Readiness Checklist
+* Security review signoff
+* All high severity vulnerabilities resolved
+* Load test results documented
+* Backup policy for audit logs validated
+* On-call runbook approved
+* Metrics dashboard published
+* DR scenario (Redis restore) executed
+
+### Item 18 – Documentation Polish
+Add: persona sequence diagram, SSE client snippet (curl + Node), lineage ASCII diagram, policy cookbook (examples: single approver, 2-of-3 quorum, persona gating + escalation).
+
+## 5. Acceptance Criteria (Roll-Up)
+| Category | Criteria |
+|----------|----------|
+| Authorization | Only allowlisted users (or superApprovers) can approve/deny; attempts by others audited. |
+| Personas | Requests requiring personas cannot be approved prematurely; Slack UI reflects progress. |
+| Reliability | Requests expire exactly at timeout (± <5s drift) and escalation fires once. |
+| Observability | Metrics endpoint exposes counters & histograms; traces show end-to-end span. |
+| Security | Slack replay blocked; timestamp skew enforced; approvals idempotent. |
+| Data Integrity | Audit log includes `policy_hash`, `payload_hash`, `decision`, `approvers[]`. |
+| Performance | P95 approval decision latency (non-waiting time) < 250ms internal processing. |
+| Load | System sustains 200 concurrent pending requests & 50 SSE streams without degradation. |
+
+## 6. Risks & Mitigations
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| Redis outage | Approvals stall | Implement transient in-memory buffer + circuit breaker |
+| Slack rate limits | Delayed notifications | Exponential backoff + queue + metrics alert |
+| Replay attack | Unauthorized state change | Signature replay cache + strict timestamp |
+| Policy misconfig | Unintended denies or open approvals | Policy validation + dry-run mode + policy hash tagging |
+| SSE scaling | Excess open FDs | Connection cap + fallback polling + keepalive timeouts |
+
+## 7. Metrics Definition
+Prometheus naming convention: snake_case, base unit seconds where temporal.
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| approval_requests_total | counter | action | Number of guard requests created |
+| approvals_total | counter | action | Count of approvals (final) |
+| denies_total | counter | action | Count of denies |
+| expired_total | counter | action | Count of expired requests |
+| escalations_total | counter | action | Escalation notifications sent |
+| decision_latency_seconds | histogram | action | Time from request create → terminal state |
+| pending_requests | gauge | action | Current non-terminal requests |
+
+## 8. Environments
+| Env | Purpose | Differences |
+|-----|---------|------------|
+| dev | Local iteration | In-memory store optional; verbose logging |
+| staging | Pre-prod validation | Full Redis + Slack test workspace |
+| prod | Production | Hardened security, mTLS optional, metrics & tracing on |
+
+## 9. Exit / Launch Checklist
+1. All backlog items status = Done (or consciously deferred + documented).
+2. Security hardening tasks completed & validated by test harness.
+3. Load & concurrency test results documented in repo.
+4. Runbook accessible & reviewed.
+5. Observability dashboard live & linked in README.
+6. CI pipeline green across 3 successive runs.
+7. Version tag created (v1.0.0) with changelog.
+
+## 10. Tracking & Reporting
+Recommend mapping each ID to an issue (e.g., GitHub issues with label `approval-svc`) and a project board with columns: Backlog → In Progress → Review → Done.
+
+---
+Prepared as implementation guide & execution tracker. Update `Last Updated` field when modifying plan.

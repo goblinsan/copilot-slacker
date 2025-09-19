@@ -1,0 +1,45 @@
+actions:
+  npm_install:
+    description: "Install npm packages"
+    approvers:
+      allowSlackIds: ["U123", "U456"]
+      minApprovals: 1
+    personasRequired: ["QA"]
+    timeoutSec: 600
+    redactParams:
+      mode: allowlist
+      keys: ["packages", "justification"]
+  run_migration:
+    description: "Execute database migration script"
+    approvers:
+      allowSlackIds: ["U789", "U456"]
+      minApprovals: 2
+    personasRequired: ["Architect", "Reviewer"]
+    timeoutSec: 1200
+    escalation:
+      afterSec: 900
+      fallbackUser: "U123"
+  update_config:
+    description: "Modify production config file"
+    approvers:
+      allowSlackIds: ["U789"]
+      minApprovals: 1
+    personasRequired: ["Security"]
+    timeoutSec: 900
+  rotate_secret:
+    description: "Rotate application secret"
+    approvers:
+      allowSlackIds: ["USEC1", "USEC2"]
+      minApprovals: 2
+    personasRequired: ["Security"]
+    timeoutSec: 1800
+    redactParams:
+      mode: denylist
+      keys: ["secretValue"]
+routing:
+  defaultChannel: "CPRIVATE123"
+  dmFallbackUser: "U123"
+  defaultTimeoutSec: 600
+defaults:
+  unknownAction: deny
+  superApprovers: ["UADMIN1"]
