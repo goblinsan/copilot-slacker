@@ -1,7 +1,7 @@
 # Approval Service Project Plan
 
 Status: Draft  
-Last Updated: 2025-09-20 (completed items 13,14,37,39,40,41; retention, archival, load baseline & deployment packaging added)
+Last Updated: 2025-09-20 (completed items 13,14,15,37,39,40,41; retention, archival, load baseline, deployment packaging & CI/CD added)
 
 ## 1. Overview
 This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
@@ -31,7 +31,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green | ✅ |
 |13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues | ✅ |
 |14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image builds locally; Dockerfile + readiness (`/readyz`) + env validation module merged | ✅ |
-|15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push |  |
+|15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push | ✅ |
 |16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned |  |
 |17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed |  |
 |18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged |  |
@@ -100,8 +100,11 @@ Implemented `scripts/load-sim.ts` (Node + tsx). Provides concurrent request crea
 ### Item 14 – Deployment Packaging
 Dockerfile multi-stage (`node:20-alpine` build → distroless runtime). Add health (`/healthz`) & readiness (`/readyz`) endpoints.
 
-### Item 15 – CI/CD
-Jobs: `lint`, `typecheck`, `unit`, `integration-redis`, `build-image`, `scan` (trivy), `publish` (on tag). Cache node_modules with hash of lockfile.
+### Item 15 – CI/CD (Completed)
+Implemented GitHub Actions:
+* `ci.yml` on push/PR: steps (checkout, Node 20 setup, `npm ci`, lint, `typecheck`, Redis-backed test run, build dist, Docker build, dual Trivy scans fs+image with non-blocking exit).
+* `release.yml` on tag `v*`: build dist, Docker metadata, GHCR login via `GITHUB_TOKEN`, build & push image with both `latest` and semantic tag, post-push Trivy scan.
+Caching: `actions/setup-node` npm cache. Future enhancements: provenance attestations (SLSA), dependency review gating, multi-arch manifest (`linux/amd64, linux/arm64`), weekly vulnerability re-scan job.
 
 ### Item 16 – Runbook Sections
 1. Secrets rotation steps.

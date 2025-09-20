@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping || exit 1" --health-interval 5s --health-timeout 3s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit & Integration Tests
+        env:
+          STORE_BACKEND: redis
+          REDIS_URL: redis://localhost:6379
+        run: npm test -- --reporter=default
+      - name: Build Dist
+        run: npm run build:dist
+      - name: Docker Build (local)
+        run: |
+          docker build -t approval-service:test .
+      - name: Trivy Scan (filesystem)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'
+          vuln-type: 'os,library'
+        continue-on-error: true
+      - name: Trivy Scan (image)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: approval-service:test
+          format: table
+          ignore-unfixed: true
+          exit-code: '1'
+          vuln-type: 'os,library'
+        continue-on-error: true
+      - name: Summarize Scans
+        if: always()
+        run: echo "Trivy scans executed (see logs)."

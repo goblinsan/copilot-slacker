@@ -11,6 +11,7 @@
     "start:dist": "node dist/server.js",
     "docker:build": "docker build -t approval-service:local .",
     "docker:run": "docker run --rm -p 8080:8080 approval-service:local",
+    "typecheck": "tsc -p . --noEmit",
     "test": "vitest run",
     "audit:export": "tsx src/cli-audit-export.ts",
     "load-sim": "tsx scripts/load-sim.ts"
