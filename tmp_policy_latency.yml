@@ -1,0 +1,5 @@
+actions:
+  latency_action:
+    approvers:
+      allowSlackIds: [ULAT]
+      minApprovals: 1

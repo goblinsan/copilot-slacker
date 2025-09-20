@@ -28,7 +28,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 | 9 | Parameter override modal | Slack modal for Approve with edits; validate & merge | 2 | 3 | Edited params reflected in final decision payload | ✅ |
 |10 | Audit log persistence backend | Durable sink (file/Redis Stream); export tool | 4 | 4 | `audit export` returns filtered events | ✅ |
 |11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible | ✅ |
-|12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green |  |
+|12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green | ✅ |
 |13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues |  |
 |14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image published & manifests deploy locally |  |
 |15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push |  |

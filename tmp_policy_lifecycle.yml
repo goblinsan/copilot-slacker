@@ -1,0 +1,8 @@
+actions:
+  test_action:
+    approvers:
+      allowSlackIds: [UAPP]
+      minApprovals: 1
+    personasRequired: [alpha, beta]
+    allowParamOverrides: true
+    overrideKeys: [x]
