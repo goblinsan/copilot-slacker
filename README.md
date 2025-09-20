@@ -357,6 +357,10 @@ Build the image (multi-stage, Node 20 Alpine):
 ```bash
 docker build -t approval-service:local .
 ```
+Multi-arch (GHCR releases): Tagged releases publish a manifest supporting `linux/amd64` and `linux/arm64` (see project plan item #42). Local manual multi-arch build example (requires buildx):
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/<owner>/approval-service:test --push .
+```
 Run locally exposing port 8080:
 ```bash
 docker run --rm -p 8080:8080 \

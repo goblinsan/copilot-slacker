@@ -58,7 +58,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |34 | Override rejection counters | Add counters per rejection reason (limit/schema/diff) | 30,31,32 | 4 | /metrics exposes override_rejections_total{action,reason} | ✅ |
 |35 | Schema introspection endpoint | Expose GET /api/schemas/:action redacted view | 31 | 3 | Endpoint returns loaded schema subset | ✅ |
 |36 | Override outcome labeling | Add outcome label to param_overrides_total (applied/rejected) | 27,30-32 | 4 | Metric exposes outcome label | ✅ |
-|42 | Multi-arch image build | Build & publish linux/amd64 + linux/arm64 manifests | 14,15 | 5 | Release workflow publishes multi-arch image |  |
+|42 | Multi-arch image build | Build & publish linux/amd64 + linux/arm64 manifests | 14,15 | 5 | Release workflow publishes multi-arch image | ✅ |
 |43 | Distroless runtime image | Replace alpine final stage with distroless node base | 14 | 5 | Image passes tests; vuln count reduced |  |
 |44 | SBOM & provenance | Generate SBOM (cyclonedx) + SLSA provenance attestation | 15 | 5 | Artifacts attached to release |  |
 |45 | Image signing | Cosign sign & verify in deployment pipeline | 44 | 5 | Signatures verified pre-deploy |  |
@@ -120,6 +120,9 @@ Created `docs/runbook.md` covering: system overview, secrets rotation, policy re
 
 ### Item 17 – Production Readiness Checklist (Completed)
 Created `docs/production-readiness.md` summarizing: SLOs (latency, availability), security controls (signature verification, replay defense, mTLS option), DR plan (Redis snapshot + archive export), backup validation steps, escalation & paging policy, performance baseline (load harness data), metrics dashboard inventory, and go-live gates (all critical items closed, no HIGH vulns, runbook approved, restore test passed).
+
+### Item 42 – Multi-arch Image Build (Completed)
+Updated `release.yml` to enable `docker/setup-qemu-action` and `docker/setup-buildx-action` then build & push a manifest list for `linux/amd64,linux/arm64` via `docker/build-push-action@v5` with cache configuration. Provenance & SBOM generation intentionally disabled for now (tracked under items #44 and #44/#45). Exit criteria met: future tag releases will publish multi-architecture images (`latest` + semantic tag) to GHCR.
 
 ### Future Enhancements Backlog
 Outlined items 42–50 targeting operational hardening: multi-architecture distribution, distroless runtime to shrink attack surface, supply chain integrity (SBOM, provenance, signing), continuous vulnerability posture (scheduled scans & dependency automation), resilience (Redis HA test), observability gap closure (Slack 429 metrics), and incident process maturity (timeline template).
