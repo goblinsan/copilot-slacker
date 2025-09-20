@@ -14,6 +14,8 @@ function approvalsSig(list: unknown): string | undefined {
 export type ApprovalResult = { ok: true; terminal?: boolean } | { ok: false; error: string };
 
 export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalResult {
+  // Capture a stable object identity token for the incoming request reference.
+  const identity = (req as any).__identity || ((req as any).__identity = crypto.randomUUID());
   // Debug pre-state snapshot (guarded by env flag to reduce noise in normal runs)
   const debug = process.env.APPROVAL_DEBUG === '1';
   if (debug) {
@@ -51,6 +53,18 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     decision: 'approved',
     created_at: new Date().toISOString()
   });
+  // After store mutation, verify that approvals_count changed or can be recomputed. If still unchanged,
+  // emit a divergence event (always-on) to aid CI diagnosis.
+  if (req.approvals_count === prevCount) {
+    try {
+      const listNow = (Store.approvalsFor as any)(req.id);
+      if (Array.isArray(listNow) && listNow.length > prevCount) {
+        // approvals list length grew but the count on req did not.
+        audit('approval_divergence_detected', { request_id: req.id, actor, prevCount, list_len: listNow.length, count_field: req.approvals_count, identity, store_instance: getStoreInstanceId?.() });
+        (req as any).approvals_count = listNow.length; // self-heal
+      }
+    } catch {/* ignore */}
+  }
   if (debug) {
     try {
       const midList = (Store.approvalsFor as any)(req.id);
@@ -82,7 +96,7 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       }
     }
   } catch { /* ignore */ }
-  audit('approval_added', { request_id: req.id, actor, count: req.approvals_count, store_instance: getStoreInstanceId?.() });
+  audit('approval_added', { request_id: req.id, actor, count: req.approvals_count, identity, store_instance: getStoreInstanceId?.() });
   if (debug) {
     try {
       const postList = (Store.approvalsFor as any)(req.id);

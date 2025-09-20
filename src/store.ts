@@ -23,11 +23,11 @@ function createMemoryStore(): IStore {
   const approvals = new Map<string, ApprovalRecord[]>();
   const personaSignals = new Map<string, PersonaSignalRecord[]>();
   const api: any = {
-    createRequest(rec: Omit<GuardRequestRecord,'id'>) { const id = crypto.randomUUID(); const full: GuardRequestRecord = { ...rec, id }; requests.set(id, full); return full; },
+  createRequest(rec: Omit<GuardRequestRecord,'id'>) { const id = crypto.randomUUID(); const full: GuardRequestRecord = { ...rec, id } as any; (full as any).__identity = crypto.randomUUID(); requests.set(id, full); return full; },
     getByToken(token: string) { return [...requests.values()].find(r => r.token === token); },
     getById(id: string) { return requests.get(id); },
     updateStatus(id: string, from: RequestStatus[], to: RequestStatus) { const r = requests.get(id); if(!r) return; if(!from.includes(r.status)) return; r.status = to; if(['approved','denied','expired'].includes(to)) r.decided_at = new Date().toISOString(); return r; },
-    addApproval(a: ApprovalRecord) { const list = approvals.get(a.request_id)||[]; list.push(a); approvals.set(a.request_id,list); const r = requests.get(a.request_id); if(r) r.approvals_count = list.filter(x=>x.decision==='approved').length; },
+  addApproval(a: ApprovalRecord) { const list = approvals.get(a.request_id)||[]; list.push(a); approvals.set(a.request_id,list); const r = requests.get(a.request_id); if(r){ r.approvals_count = list.filter(x=>x.decision==='approved').length; try { const { audit } = require('./log.js'); audit('store_add_approval',{ request_id: a.request_id, list_len: list.length, count_field: r.approvals_count, identity: (r as any).__identity }); } catch {} } },
     listApprovals(id: string) { return approvals.get(id)||[]; },
     setSlackMessage(id: string, channel: string, ts: string) { const r = requests.get(id); if(r){ r.slack_channel=channel; r.slack_message_ts=ts; } },
     updatePersonaState(request_id: string, persona: string, state: 'ack'|'rejected', actor_slack_id: string){ const list = personaSignals.get(request_id)||[]; let row = list.find(p=>p.persona===persona); const now = new Date().toISOString(); if(!row){ row={ id: crypto.randomUUID(), request_id, persona, actor_slack_id, state, created_at: now, updated_at: now }; list.push(row);} else { row.state=state; row.actor_slack_id=actor_slack_id; row.updated_at=now; } personaSignals.set(request_id,list); const req = requests.get(request_id); if(req) req.persona_state[persona]=state; },
