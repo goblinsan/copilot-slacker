@@ -388,11 +388,11 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         incCounter('param_overrides_total',{ action: record.action, outcome: 'rejected' });
         return json(res,200,{ response_action:'errors', errors:{ _ : `Schema validation failed: ${schemaResult.errors.slice(0,3).join('; ')}` } });
       }
-      // Apply overrides to redacted_params and recompute payload_hash
+      // Apply overrides to redacted_params and recompute payload_hash BEFORE approval so approval sees final params
       const newParams = { ...record.redacted_params, ...overrides };
       record.redacted_params = newParams;
       record.payload_hash = crypto.createHash('sha256').update(JSON.stringify(newParams)).digest('hex');
-      // Approve immediately (treat like approval with overrides)
+      // Approve immediately (treat like approval with overrides). Any approvals_count anomaly will be recomputed inside applyApproval
       const approval = applyApproval(record, userId);
       if (!approval.ok) {
         return json(res,200,{ response_action:'errors', errors:{ _ : errorMessage(approval.error) } });

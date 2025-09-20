@@ -51,7 +51,17 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       // ignore fallback errors
     }
   }
-  audit('approval_added', { request_id: req.id, actor, count: req.approvals_count });
+  // Deterministic recompute (covers potential multi-instance mutation anomalies)
+  try {
+    const listMaybe = (Store.approvalsFor as any)(req.id);
+    if (Array.isArray(listMaybe)) {
+      if (req.approvals_count !== listMaybe.length) {
+        audit('approval_count_recomputed', { request_id: req.id, actor, before: req.approvals_count, after: listMaybe.length, store_instance: getStoreInstanceId?.() });
+        (req as any).approvals_count = listMaybe.length;
+      }
+    }
+  } catch { /* ignore */ }
+  audit('approval_added', { request_id: req.id, actor, count: req.approvals_count, store_instance: getStoreInstanceId?.() });
   if (req.approvals_count >= req.min_approvals) {
     req.status = 'approved';
     req.decided_at = new Date().toISOString();
