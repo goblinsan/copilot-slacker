@@ -6,6 +6,7 @@ Slack-based approval gate for LLM / agent risky operations (dependency install, 
 * Guarded action requests with policy-driven routing and timeouts.
 * Slack interactive Approve / Deny buttons.
 * Optional parameter override modal (policy-gated safe edits prior to approval).
+* Override governance (limit changed keys, audited diffs & rejections).
 * Persona co-sign (scaffolding present; enrichment TBD).
 * Audit logging (stdout JSON lines).
 * Pluggable store (in-memory; replace with Redis adapter).
@@ -178,8 +179,9 @@ the Slack message (once persona gating is satisfied) includes an `Approve w/ Edi
 2. Changed values merge into `redacted_params` (no exposure of previously redacted secrets).
 3. A new `payload_hash` is computed over the merged parameters.
 4. The request is approved atomically after applying overrides (single step UX).
-5. Audit event `override_applied` records changed key names.
-6. Metric `param_overrides_total{action}` increments.
+5. Governance: if `OVERRIDE_MAX_KEYS` is set, submissions changing more than this number of keys are rejected with an `override_rejected` audit event (reason `limit_exceeded`).
+6. Audit event `override_applied` records changed key names and full redacted before/after diff for each changed key.
+7. Metric `param_overrides_total{action}` increments on success.
 
 Planned enhancements (see project plan items 27–30):
 * Schema validation per action (reject malformed values).
@@ -202,6 +204,7 @@ Planned enhancements (see project plan items 27–30):
   - `SLACK_SIGNING_SECRET`
   - `POLICY_PATH`
   - `PORT`
+  - `OVERRIDE_MAX_KEYS` (optional integer; reject override submissions modifying more than this many keys)
   - `TLS_CERT_FILE` / `TLS_KEY_FILE` (optional TLS)
   - `TLS_CA_FILE` (optional, for mTLS)
   - `REQUIRE_CLIENT_CERT` (true/false)

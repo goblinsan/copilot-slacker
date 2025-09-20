@@ -310,6 +310,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       }
       const stateValues = parsed.view.state?.values || {};
       const overrides: Record<string, unknown> = {};
+      const before: Record<string, unknown> = {};
       for (const key of record.override_keys) {
         const block = stateValues[`ov_${key}`];
         const valObj = block?.value || block?.['value'];
@@ -317,7 +318,13 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         const v = entry?.value;
         if (typeof v === 'string' && v !== String((record.redacted_params as any)[key] ?? '')) {
           overrides[key] = v;
+          before[key] = (record.redacted_params as any)[key];
         }
+      }
+      const maxKeys = process.env.OVERRIDE_MAX_KEYS ? Number(process.env.OVERRIDE_MAX_KEYS) : undefined;
+      if (maxKeys !== undefined && Object.keys(overrides).length > maxKeys) {
+        audit('override_rejected',{ request_id: record.id, actor: userId, changed_keys: Object.keys(overrides), reason: 'limit_exceeded', limit: maxKeys });
+        return json(res,200,{ response_action:'errors', errors:{ _ : `Too many changes (max ${maxKeys})` } });
       }
       // Apply overrides to redacted_params and recompute payload_hash
       const newParams = { ...record.redacted_params, ...overrides };
@@ -328,7 +335,9 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       if (!approval.ok) {
         return json(res,200,{ response_action:'errors', errors:{ _ : errorMessage(approval.error) } });
       }
-      audit('override_applied',{ request_id: record.id, actor: userId, overrides: Object.keys(overrides) });
+      const diff: Record<string,{ before: unknown; after: unknown }> = {};
+      for (const k of Object.keys(overrides)) diff[k] = { before: before[k], after: overrides[k] };
+      audit('override_applied',{ request_id: record.id, actor: userId, overrides: Object.keys(overrides), diff });
       incCounter('param_overrides_total',{ action: record.action });
       broadcastForRequestId(record.id);
       try { await updateRequestMessage(record); } catch {}
