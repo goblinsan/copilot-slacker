@@ -13,6 +13,7 @@ import { incCounter, serializePrometheus } from './metrics.js';
 import { addListener, emitState, sendEvent, broadcastForRequestId } from './sse.js';
 import { markAndCheckReplay } from './replay.js';
 import { isAllowed as rateLimitAllowed } from './ratelimit.js';
+import { validateOverrides } from './override-schema.js';
 
 const POLICY_PATH = process.env.POLICY_PATH || '.agent/policies/guards.yml';
 const policyFile = loadPolicy(POLICY_PATH);
@@ -317,7 +318,13 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         const entry = block?.value || Object.values(block||{})[0];
         const v = entry?.value;
         if (typeof v === 'string' && v !== String((record.redacted_params as any)[key] ?? '')) {
-          overrides[key] = v;
+          // Tentative value assignment (coerce number if numeric-like)
+          let val: any = v;
+          if (/^-?\d+(?:\.\d+)?$/.test(v)) {
+            const num = Number(v);
+            if (!Number.isNaN(num)) val = num;
+          }
+          overrides[key] = val;
           before[key] = (record.redacted_params as any)[key];
         }
       }
@@ -325,6 +332,12 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       if (maxKeys !== undefined && Object.keys(overrides).length > maxKeys) {
         audit('override_rejected',{ request_id: record.id, actor: userId, changed_keys: Object.keys(overrides), reason: 'limit_exceeded', limit: maxKeys });
         return json(res,200,{ response_action:'errors', errors:{ _ : `Too many changes (max ${maxKeys})` } });
+      }
+      // Schema validation (if schema for action exists)
+      const schemaResult = validateOverrides(record.action, overrides);
+      if (!schemaResult.ok) {
+        audit('override_rejected',{ request_id: record.id, actor: userId, changed_keys: Object.keys(overrides), reason: 'schema_validation', errors: schemaResult.errors });
+        return json(res,200,{ response_action:'errors', errors:{ _ : `Schema validation failed: ${schemaResult.errors.slice(0,3).join('; ')}` } });
       }
       // Apply overrides to redacted_params and recompute payload_hash
       const newParams = { ...record.redacted_params, ...overrides };

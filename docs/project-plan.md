@@ -46,6 +46,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |28 | Metrics reference documentation | Dedicated docs/metrics.md detailing each metric & labels | 11,19,23,24,25 | 4 | File published & linked from README |  |
 |29 | Distributed replay/rate limit cache | Redis-backed replay + rate limit synchronization | 4,8 | 4 | Replay & rate limits function across multi-instance |  |
 |30 | Override governance policy | Enforce allowed override keys + optional diff size limit | 9 | 3 | Attempts exceeding limits rejected & audited | ✅ |
+|31 | Override schema validation | Per-action lightweight JSON schema for overrides | 9 | 3 | Invalid overrides rejected & audited | ✅ |
 |26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans |  |
 |27 | Parameter override metrics | Counter param_overrides_total{action} & label outcome | 9 | 4 | Metric increments on successful override submission |  |
 |28 | Metrics reference documentation | Dedicated docs/metrics.md detailing each metric & labels | 11,19,23,24,25 | 4 | File published & linked from README |  |

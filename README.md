@@ -182,6 +182,20 @@ the Slack message (once persona gating is satisfied) includes an `Approve w/ Edi
 5. Governance: if `OVERRIDE_MAX_KEYS` is set, submissions changing more than this number of keys are rejected with an `override_rejected` audit event (reason `limit_exceeded`).
 6. Audit event `override_applied` records changed key names and full redacted before/after diff for each changed key.
 7. Metric `param_overrides_total{action}` increments on success.
+8. Optional schema validation: if a file `.agent/schemas/<action>.json` exists it is loaded and each changed key is validated against a minimal schema subset (type, enum, pattern, minLength, maxLength, min, max). Failures reject the submission with `override_rejected` (reason `schema_validation`).
+
+Schema example (`.agent/schemas/deploy_config.json`):
+```json
+{
+  "type": "object",
+  "properties": {
+    "justification": { "type": "string", "minLength": 10, "maxLength": 140 },
+    "version": { "type": "string", "pattern": "^v[0-9]+\.[0-9]+\.[0-9]+$" },
+    "retries": { "type": "number", "min": 0, "max": 5 }
+  }
+}
+```
+Only changed keys are validated (partial update semantics). Unsupported / extra JSON Schema keywords are ignored.
 
 Planned enhancements (see project plan items 27–30):
 * Schema validation per action (reject malformed values).
@@ -205,6 +219,7 @@ Planned enhancements (see project plan items 27–30):
   - `POLICY_PATH`
   - `PORT`
   - `OVERRIDE_MAX_KEYS` (optional integer; reject override submissions modifying more than this many keys)
+  - (Schema) Place per-action JSON schema in `.agent/schemas/<action>.json` to enable validation
   - `TLS_CERT_FILE` / `TLS_KEY_FILE` (optional TLS)
   - `TLS_CA_FILE` (optional, for mTLS)
   - `REQUIRE_CLIENT_CERT` (true/false)

@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "packages": { "type": "string", "pattern": "^[a-z0-9_,@\\-.]+$", "maxLength": 40 },
+    "justification": { "type": "string", "minLength": 5, "maxLength": 100 },
+    "count": { "type": "number", "min": 1, "max": 5 }
+  }
+}
