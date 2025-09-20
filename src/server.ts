@@ -469,7 +469,10 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         incCounter('persona_ack_total',{ action: record.action, persona });
         personaChanged = true;
         const allAck = record.required_personas.every(p => record.persona_state[p] === 'ack');
-        if (allAck && record.status === 'awaiting_personas') record.status = 'ready_for_approval';
+        if (allAck && record.status === 'awaiting_personas') {
+          record.status = 'ready_for_approval';
+        }
+        try { audit('persona_ack_stage',{ request_id: record.id, actor: userId, persona, state: record.persona_state[persona], all_ack: allAck, status: record.status }); } catch {/* ignore */}
       }
     }
     if (result && !result.ok) {

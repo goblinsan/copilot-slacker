@@ -23,7 +23,16 @@ try {
 
 export type ApprovalResult = { ok: true; terminal?: boolean } | { ok: false; error: string };
 
+// Per-request approval stage sequencing for deterministic ordering diagnostics
+const approvalSeq = new Map<string, number>();
+function nextSeq(id: string) { const n = (approvalSeq.get(id) || 0) + 1; approvalSeq.set(id, n); return n; }
+
 export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalResult {
+  const stageDiag = process.env.APPROVAL_STAGE_DIAG === '1';
+  function stage(stage: string) {
+    if (!stageDiag) return; try { audit('approval_stage',{ request_id: req.id, actor, stage, seq: nextSeq(req.id), status: req.status, count: req.approvals_count }); } catch {/* ignore */}
+  }
+  stage('enter');
   // Capture / assign identity on the incoming (possibly non-canonical) reference.
   const identity = (req as any).__identity || ((req as any).__identity = crypto.randomUUID());
   // Always attempt to resolve the canonical request object from the Store first. Divergence in CI indicates
@@ -34,6 +43,7 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       const canonical = maybe as GuardRequestRecord;
       const canonId = (canonical as any).__identity || ((canonical as any).__identity = crypto.randomUUID());
       audit('approval_canonical_adopted', { request_id: req.id, actor, identity_orig: identity, identity_canonical: canonId, status_orig: req.status, status_canonical: canonical.status });
+      stage('canonical_adopted');
       // Synchronize any caller-side field mutations (like overrides already applied to req.redacted_params) into canonical
       // if they differ and canonical is considered source of truth thereafter.
       if (req !== canonical) {
@@ -46,8 +56,10 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       req = canonical; // adopt canonical for rest of function
     } else if (!maybe) {
       audit('approval_store_miss', { request_id: req.id, actor, identity, phase: 'pre_add' });
+      stage('store_miss_pre');
     }
   } catch { /* ignore canonical resolution errors */ }
+  stage('prechecks');
   // Debug pre-state snapshot (guarded by env flag to reduce noise in normal runs)
   const debug = process.env.APPROVAL_DEBUG === '1';
   if (debug) {
@@ -58,38 +70,65 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
   }
   if (!req.allowed_approver_ids.includes(actor)) {
     audit('unauthorized_approval_attempt', { request_id: req.id, actor });
+    stage('exit_unauthorized');
+    audit('approval_exit',{ request_id: req.id, actor, reason: 'not_authorized' });
     return { ok: false, error: 'not_authorized' };
   }
   if (['approved','denied','expired'].includes(req.status)) {
     audit('approval_rejected_terminal', { request_id: req.id, actor, status: req.status });
+    stage('exit_terminal');
+    audit('approval_exit',{ request_id: req.id, actor, reason: 'terminal_preexisting', status: req.status });
     return { ok: false, error: 'terminal' };
   }
   if (req.status !== 'ready_for_approval') {
     // Helpful for CI debugging when status unexpectedly differs (e.g., awaiting_personas)
     audit('approval_rejected_not_ready', { request_id: req.id, actor, status: req.status });
+    stage('exit_not_ready');
+    audit('approval_exit',{ request_id: req.id, actor, reason: 'not_ready', status: req.status });
     return { ok: false, error: 'not_ready' };
   }
+  stage('auth_status_ok');
   // Support both sync and async store implementations for hasApproval
   const has = (Store.hasApproval as any)(req.id, actor);
   const already = typeof has === 'boolean' ? has : (typeof has?.then === 'function' ? false : Boolean(has));
   if (already) {
     audit('approval_rejected_duplicate', { request_id: req.id, actor });
+    stage('exit_duplicate');
+    audit('approval_exit',{ request_id: req.id, actor, reason: 'duplicate' });
     return { ok: false, error: 'duplicate' };
   }
+  stage('pre_add');
+  const fastPathEnabled = process.env.APPROVAL_FAST_PATH_DIAG === '1' && req.min_approvals === 1 && req.approvals_count === 0;
+  if (fastPathEnabled) {
+    (req as any).approvals_count = 1;
+    req.status = 'approved';
+    req.decided_at = new Date().toISOString();
+    audit('approval_fast_path_used',{ request_id: req.id, actor });
+    stage('fast_path_applied');
+  }
   const prevCount = req.approvals_count;
-  Store.addApproval({
-    id: crypto.randomUUID(),
-    request_id: req.id,
-    actor_slack_id: actor,
-    actor_type: 'human',
-    decision: 'approved',
-    created_at: new Date().toISOString()
-  });
+  try {
+    Store.addApproval({
+      id: crypto.randomUUID(),
+      request_id: req.id,
+      actor_slack_id: actor,
+      actor_type: 'human',
+      decision: 'approved',
+      created_at: new Date().toISOString()
+    });
+  } catch (e:any) {
+    audit('approval_add_error',{ request_id: req.id, actor, error: String(e) });
+    stage('exit_add_error');
+    audit('approval_exit',{ request_id: req.id, actor, reason: 'store_error', error: String(e) });
+    return { ok: false, error: 'store_error' };
+  }
+  stage('post_add_attempt');
   // Post-mutation canonical fetch (in case addApproval happened on different in-memory instance than our local ref)
   try {
     const after = (Store as any).getById ? (Store as any).getById(req.id) : undefined;
     if (!after) {
       audit('approval_store_miss', { request_id: req.id, actor, identity, phase: 'post_add' });
+      stage('store_miss_post');
     } else if (after !== req) {
       // Our local reference diverged from canonical mutated record; adopt counts/status from canonical.
       const afterId = (after as any).__identity;
@@ -98,6 +137,7 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
         (req as any).approvals_count = after.approvals_count;
       }
       req = after; // adopt canonical for remainder
+      stage('canonical_after_add');
     }
   } catch { /* ignore */ }
   // After store mutation, verify that approvals_count changed or can be recomputed. If still unchanged,
@@ -156,6 +196,7 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     }
   } catch {/* ignore */}
   audit('approval_added', { request_id: req.id, actor, count: req.approvals_count, identity: (req as any).__identity || identity, store_instance: getStoreInstanceId?.() });
+  stage('post_added');
   if (debug) {
     try {
       const postList = (Store.approvalsFor as any)(req.id);
@@ -182,6 +223,8 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     req.status = 'approved';
     req.decided_at = new Date().toISOString();
     audit('request_approved', { request_id: req.id, actor });
+    stage('exit_terminal_approved');
+    audit('approval_exit',{ request_id: req.id, actor, reason: 'success_terminal' });
     incCounter('approvals_total',{ action: req.action });
     const latencySec = (new Date(req.decided_at).getTime() - new Date(req.created_at).getTime())/1000;
   observeDecisionLatency(latencySec,{ action: req.action, outcome: 'approved' });
@@ -198,6 +241,8 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
         req.status = 'approved';
         req.decided_at = new Date().toISOString();
         audit('request_approved', { request_id: req.id, actor, recompute: true });
+        stage('exit_terminal_approved_recompute');
+        audit('approval_exit',{ request_id: req.id, actor, reason: 'success_terminal_recompute' });
         incCounter('approvals_total',{ action: req.action });
         const latencySec2 = (new Date(req.decided_at).getTime() - new Date(req.created_at).getTime())/1000;
         observeDecisionLatency(latencySec2,{ action: req.action, outcome: 'approved' });
@@ -207,6 +252,8 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
   } catch {
     // ignore recompute errors
   }
+  stage('exit_nonterminal');
+  audit('approval_exit',{ request_id: req.id, actor, reason: 'success_nonterminal', count: req.approvals_count });
   return { ok: true };
 }
 
