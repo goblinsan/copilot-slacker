@@ -1,0 +1,5 @@
+actions:
+  load_action:
+    approvers:
+      allowSlackIds: [ULOAD]
+      minApprovals: 1
