@@ -27,7 +27,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 | 8 | Security hardening | Slack timestamp skew, replay guard, rate limits, mTLS option | 1 | 1 | All security tests pass; stale signatures rejected | ✅ |
 | 9 | Parameter override modal | Slack modal for Approve with edits; validate & merge | 2 | 3 | Edited params reflected in final decision payload | ✅ |
 |10 | Audit log persistence backend | Durable sink (file/Redis Stream); export tool | 4 | 4 | `audit export` returns filtered events | ✅ |
-|11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible | (spans in progress) |
+|11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible | ✅ |
 |12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green |  |
 |13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues |  |
 |14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image published & manifests deploy locally |  |
@@ -47,7 +47,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |29 | Distributed replay/rate limit cache | Redis-backed replay + rate limit synchronization | 4,8 | 4 | Replay & rate limits function across multi-instance |  |
 |30 | Override governance policy | Enforce allowed override keys + optional diff size limit | 9 | 3 | Attempts exceeding limits rejected & audited | ✅ |
 |31 | Override schema validation | Per-action lightweight JSON schema for overrides | 9 | 3 | Invalid overrides rejected & audited | ✅ |
-|26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans |  |
+|26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans | ✅ |
 |27 | Parameter override metrics | Counter param_overrides_total{action} & label outcome | 9 | 4 | Metric increments on successful override submission |  |
 |28 | Metrics reference documentation | Dedicated docs/metrics.md detailing each metric & labels | 11,19,23,24,25 | 4 | File published & linked from README |  |
 |29 | Distributed replay/rate limit cache | Redis-backed replay + rate limit synchronization | 4,8 | 4 | Replay & rate limits function across multi-instance |  |

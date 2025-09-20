@@ -10,10 +10,11 @@
 import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { SimpleSpanProcessor } from '@opentelemetry/sdk-trace-node';
+import { InMemorySpanExporter, ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { Resource } from '@opentelemetry/resources';
 
 let tracerProvider: NodeTracerProvider | undefined;
-let memorySpans: any[] | undefined;
+let memoryExporter: InMemorySpanExporter | undefined;
 
 export function initTracing() {
   if (tracerProvider || process.env.TRACING_ENABLED !== 'true') return;
@@ -28,16 +29,8 @@ export function initTracing() {
     const { ConsoleSpanExporter } = require('@opentelemetry/sdk-trace-node');
     tracerProvider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
   } else if (exporterType === 'memory') {
-    memorySpans = [];
-    class MemoryExporter {
-      export(batch: any, resultCallback: any){
-        // batch is array of spans
-        for (const s of batch) memorySpans!.push(s);
-        resultCallback && resultCallback();
-      }
-      shutdown() { return Promise.resolve(); }
-    }
-    tracerProvider.addSpanProcessor(new SimpleSpanProcessor(new MemoryExporter()));
+    memoryExporter = new InMemorySpanExporter();
+    tracerProvider.addSpanProcessor(new SimpleSpanProcessor(memoryExporter));
   } else if (exporterType === 'none') {
     // no exporter
   }
@@ -69,4 +62,4 @@ export async function withSpan<T>(name: string, fn: (span: any) => Promise<T> | 
 }
 
 // Test helper (only populated when TRACING_EXPORTER=memory)
-export function getCollectedSpans(): any[] { return memorySpans || []; }
+export function getCollectedSpans(): ReadableSpan[] { return memoryExporter ? memoryExporter.getFinishedSpans() : []; }
