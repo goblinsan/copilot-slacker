@@ -5,6 +5,7 @@ import { getCollectedSpans, resetCollectedSpans, initTracing, shutdownTracing } 
 import { updateRequestMessage, postEscalationNotice } from '../src/slack.js';
 import http from 'node:http';
 import { Store } from '../src/store.js';
+import { waitFor } from './utils/waitFor.js';
 
 function httpRequest(path: string, method='GET', body?: any, headers?: Record<string,string>): Promise<{code:number, body:string}> {
   return new Promise((resolve,reject)=>{
@@ -48,32 +49,23 @@ describe('tracing spans (#37)', () => {
     expect(createRes.code).toBe(200);
     const token = JSON.parse(createRes.body).token;
 
-    // Manually compress timing to force escalation + expiration quickly
+    // Compress timing to force escalation + expiration quickly
     const rec = await Store.getByToken(token);
     if (rec) {
       const now = Date.now();
-      // escalate at now + 120ms, expire at now + 300ms
       rec.escalate_at = new Date(now + 120).toISOString();
       rec.expires_at = new Date(now + 300).toISOString();
       rec.escalation_channel = rec.escalation_channel || 'C123TEST';
       rec.escalation_fired = false;
     }
-    // Wait long enough (> 300ms + scheduler interval buffer)
-    await new Promise(r=>setTimeout(r, 700));
 
-    // If scheduler didn't yet trigger update (race), manually invoke update + escalation to capture spans
-    const afterWait = await Store.getByToken(token);
-    if (afterWait && afterWait.status !== 'expired') {
-      // Force expiration transition and emit spans manually via helpers
-      afterWait.status = 'expired';
-      afterWait.decided_at = new Date().toISOString();
-      await updateRequestMessage(afterWait);
-    } else if (afterWait) {
-      // Ensure one more update to capture slack.update_message if missed
-      await updateRequestMessage(afterWait);
-    }
+    // Poll for required spans instead of fixed sleep to reduce flakiness
+    await waitFor(() => {
+      const names = getCollectedSpans().map(s=>s.name);
+      return (names.includes('scheduler.escalate') && names.includes('scheduler.expire')) ? true : false;
+    }, { timeoutMs: 2000, intervalMs: 50, description: 'waiting for scheduler spans' });
 
-  const spans = getCollectedSpans().map(s=>s.name);
+    const spans = getCollectedSpans().map(s=>s.name);
     // Core create span
     expect(spans).toContain('request.create');
     // Escalation + expiration spans (core scheduler instrumentation)
@@ -83,7 +75,10 @@ describe('tracing spans (#37)', () => {
     expect(spans).toContain('slack.post_message');
 
     // Sanity: request should now be expired in store
-    const finalRec = await Store.getByToken(token);
-    expect(finalRec?.status).toBe('expired');
+    const finalRec = await waitFor(async () => {
+      const r = await Store.getByToken(token);
+      return r?.status === 'expired' ? r : null;
+    }, { timeoutMs: 1500, intervalMs: 40, description: 'waiting for final expired status' });
+    expect(finalRec!.status).toBe('expired');
   });
 });

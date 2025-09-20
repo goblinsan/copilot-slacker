@@ -39,10 +39,10 @@ describe('security: replay & timestamp skew', () => {
     const payload = { type:'block_actions', actions:[{ action_id:'approve', value:'noop' }] };
     const body = `payload=${encodeURIComponent(JSON.stringify(payload))}`;
     const sig = sign(secret, ts, body);
-    // First request (will fail for missing request id but should not be replay error)
+    // First request should succeed signature + skew validation and not be treated as replay
     const first = await fetch(base + '/api/slack/interactions', {
       method:'POST', headers:{ 'x-slack-request-timestamp': ts, 'x-slack-signature': sig, 'Content-Type':'application/x-www-form-urlencoded' }, body });
-  expect([200,400]).toContain(first.status); // Accept either normal path or stale-style validation path
+    expect(first.status).toBe(200);
     // Second identical request -> replay detection should trip
     const second = await fetch(base + '/api/slack/interactions', {
       method:'POST', headers:{ 'x-slack-request-timestamp': ts, 'x-slack-signature': sig, 'Content-Type':'application/x-www-form-urlencoded' }, body });

@@ -3,6 +3,7 @@ import { startServer } from '../src/server.js';
 import { Store } from '../src/store.js';
 import type { GuardRequestRecord } from '../src/types.js';
 import { startScheduler } from '../src/scheduler.js';
+import { waitFor } from './utils/waitFor.js';
 
 function buildShort(timeoutMs = 200): Omit<GuardRequestRecord,'id'> {
   const now = new Date();
@@ -34,12 +35,13 @@ beforeAll(async () => {
 
 describe('Timeout scheduler', () => {
   it('expires request after ttl', async () => {
-  const rec = await Store.createRequest(buildShort(120));
-  expect(rec.status).toBe('ready_for_approval');
-    // Wait comfortably beyond ttl + small scheduler delay
-    await new Promise(r => setTimeout(r, 400));
-  const resp = await fetch(`${baseURL}/api/guard/wait?token=${rec.token}`);
-    const json = await resp.json();
+    const rec = await Store.createRequest(buildShort(120));
+    expect(rec.status).toBe('ready_for_approval');
+    const json = await waitFor(async () => {
+      const resp = await fetch(`${baseURL}/api/guard/wait?token=${rec.token}`);
+      const data = await resp.json();
+      return data.status === 'expired' ? data : null;
+    }, { timeoutMs: 1500, intervalMs: 50, description: 'waiting for expiration' });
     expect(json.status).toBe('expired');
     expect(json.decidedAt).toBeTruthy();
   });
