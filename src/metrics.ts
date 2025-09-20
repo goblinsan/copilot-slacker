@@ -86,6 +86,7 @@ defineCounter('security_events_total','Security related events (type label)');
 defineCounter('persona_ack_total','Persona acknowledgments (labels: action, persona)');
 defineCounter('param_overrides_total','Parameter overrides (labels: action, outcome)');
 defineCounter('override_rejections_total','Override rejections (labels: action, reason)');
+defineCounter('policy_reloads_total','Policy reload events (labels: source)');
 // no pre-allocation of latency histogram; created lazily per label set
 
 export function resetAllMetrics(){ for (const c of Object.values(counters)) c.values.clear(); decisionLatencyHists.splice(0, decisionLatencyHists.length); }

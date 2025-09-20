@@ -230,10 +230,39 @@ Planned enhancements (see project plan items 27–30):
   - `SLACK_UPDATE_QUEUE` (`true|false`) enable coalescing queue for Slack message updates (reduces rate limit pressure)
   - `SLACK_RATE_BASE_DELAY_MS` (optional base backoff delay, default 300)
   - `SLACK_RATE_JITTER_MS` (optional added random jitter, default 150)
+  - `ADMIN_TOKEN` (optional) shared secret required in `x-admin-token` header for admin endpoints (policy reload)
   - (Schema) Place per-action JSON schema in `.agent/schemas/<action>.json` to enable validation
   - `TLS_CERT_FILE` / `TLS_KEY_FILE` (optional TLS)
   - `TLS_CA_FILE` (optional, for mTLS)
   - `REQUIRE_CLIENT_CERT` (true/false)
+  - `ADMIN_TOKEN` (optional) used to authorize admin operations like policy reload
+## Admin Operations
+
+### Policy Reload
+
+Hot-reload the policy file without restarting the server.
+
+Endpoint:
+```
+POST /api/admin/reload-policy
+Headers: x-admin-token: <ADMIN_TOKEN>   # if ADMIN_TOKEN is set
+```
+Response:
+```
+{ "ok": true, "actions": <count>, "hash": "<sha256>" }
+```
+Audit events:
+* `policy_reloaded` { source: "api|sighup", actions, hash }
+* `policy_reload_failed` { source, error }
+
+Metrics:
+```
+policy_reloads_total{source="api"} 1
+policy_reloads_total{source="sighup"} 0
+```
+
+SIGHUP support: sending `SIGHUP` (Unix) to the process triggers the same reload path (no auth required, assumed operational control context).
+
 * Future: Redis-backed replay cache & distributed rate limiting.
 
 ## Audit Logging

@@ -3,14 +3,25 @@ import crypto from 'node:crypto';
 import yaml from 'yaml';
 import type { PolicyAction, PolicyEvaluationResult, PolicyFile } from './types.js';
 
-let cache: { file?: PolicyFile; hash?: string } = {};
+let cache: { file?: PolicyFile; hash?: string; path?: string } = {};
 
 export function loadPolicy(path: string): PolicyFile {
   const raw = fs.readFileSync(path, 'utf8');
   const file = yaml.parse(raw) as PolicyFile;
   cache.file = file;
   cache.hash = crypto.createHash('sha256').update(raw).digest('hex');
+  cache.path = path;
   return file;
+}
+
+/** Return last loaded policy file (object reference). */
+export function getPolicy(): PolicyFile | undefined { return cache.file; }
+/** Return current policy hash (sha256 of raw YAML). */
+export function getPolicyHash(): string | undefined { return cache.hash; }
+/** Reload policy from original path; throws if no path cached. */
+export function reloadPolicy(): PolicyFile {
+  if (!cache.path) throw new Error('policy_path_unknown');
+  return loadPolicy(cache.path);
 }
 
 export function evaluate(action: string, policyFile: PolicyFile): PolicyEvaluationResult | undefined {

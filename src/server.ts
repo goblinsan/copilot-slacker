@@ -2,7 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
 import { CreateRequestInputSchema, WaitRequestInputSchema, RequestStatus, RequestStatusSchema } from './types.js';
-import { loadPolicy, evaluate } from './policy.js';
+import { loadPolicy, evaluate, getPolicy, reloadPolicy } from './policy.js';
 import { Store } from './store.js';
 import { postRequestMessage, verifySlackSignature, updateRequestMessage, slackClient } from './slack.js';
 import { applyApproval, applyDeny } from './approval.js';
@@ -17,7 +17,8 @@ import { validateOverrides, totalOverrideCharSize, loadActionSchema } from './ov
 import { withSpan, initTracing } from './tracing.js';
 
 const POLICY_PATH = process.env.POLICY_PATH || '.agent/policies/guards.yml';
-const policyFile = loadPolicy(POLICY_PATH);
+// Load initial policy; subsequent accesses should use getPolicy() for latest reference
+loadPolicy(POLICY_PATH);
 
 function json(res: http.ServerResponse, code: number, body: unknown) {
   res.writeHead(code, { 'Content-Type': 'application/json' });
@@ -137,7 +138,8 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     if (!originalRequestId || !actor) return json(res,400,{error:'missing_fields'});
     const original = await Store.getById(originalRequestId);
     if (!original) return json(res,404,{error:'not_found'});
-    const evalResult = evaluate(original.action, policyFile);
+  const currentPolicy = getPolicy();
+  const evalResult = currentPolicy ? evaluate(original.action, currentPolicy) : undefined;
     if (!evalResult || !evalResult.policy.allowReRequest) return json(res,403,{error:'not_allowed'});
     span.setAttribute?.('action', original.action);
     const cooldown = evalResult.policy.reRequestCooldownSec || 0;
@@ -163,7 +165,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     }
     const allowedIds = [
       ...(evalResult.policy.approvers.allowSlackIds || []),
-      ...(policyFile.defaults?.superApprovers || [])
+  ...(currentPolicy?.defaults?.superApprovers || [])
     ];
     const hash = crypto.createHash('sha256').update(JSON.stringify(original.redacted_params)).digest('hex');
     const rec = await Store.createRequest({
@@ -209,7 +211,8 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     }
     const body = await readBody(req);
     let parsed; try { parsed = CreateRequestInputSchema.parse(JSON.parse(body)); } catch (e:any) { return json(res,400,{error:'invalid_payload',details:e.message}); }
-    const evalResult = evaluate(parsed.action, policyFile);
+  const currentPolicy = getPolicy();
+  const evalResult = currentPolicy ? evaluate(parsed.action, currentPolicy) : undefined;
     if (!evalResult) return json(res,403,{error:'policy_denied'});
     span.setAttribute?.('action', parsed.action);
     const token = crypto.randomUUID();
@@ -225,7 +228,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     const redacted = redactParams(parsed.params, evalResult.redaction);
     const allowedIds = [
       ...(evalResult.policy.approvers.allowSlackIds || []),
-      ...(policyFile.defaults?.superApprovers || [])
+  ...(currentPolicy?.defaults?.superApprovers || [])
     ];
   const rec = await Store.createRequest({
       token,
@@ -467,8 +470,29 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
   if (req.method === 'POST' && req.url === '/api/slack/interactions') {
     // Already parsed above normally, but if we reach here and payload is a view_submission we process overrides
   }
+  // Admin: policy reload endpoint (POST /api/admin/reload-policy)
+  if (req.method === 'POST' && req.url === '/api/admin/reload-policy') {
+    return withSpan('admin.reload_policy', async span => {
+      const adminToken = process.env.ADMIN_TOKEN;
+      if (adminToken) {
+        const provided = req.headers['x-admin-token'];
+        if (provided !== adminToken) { res.writeHead(401); return res.end('unauthorized'); }
+      }
+      try {
+        const pf = reloadPolicy();
+        audit('policy_reloaded', { source: 'api', actions: Object.keys(pf.actions||{}).length, hash: (pf as any).policy_hash });
+        incCounter('policy_reloads_total',{ source: 'api' });
+        span.setAttribute?.('actions_count', Object.keys(pf.actions||{}).length);
+        return json(res,200,{ ok:true, actions:Object.keys(pf.actions||{}).length, hash: (pf as any).policy_hash });
+      } catch (e:any) {
+        audit('policy_reload_failed',{ source:'api', error:String(e) });
+        span.setAttribute?.('error','reload_failed');
+        return json(res,500,{ error:'reload_failed', detail: String(e) });
+      }
+    });
+  }
   notFound(res);
-}
+  }
 
 async function terminalAsync(rPromise: ReturnType<typeof Store.getByToken>): Promise<any> {
   const r = await rPromise as any;
@@ -524,3 +548,16 @@ if (!process.env.VITEST) {
   startServer();
   startScheduler();
 }
+
+// SIGHUP-triggered policy reload (Unix-friendly). Ignored on Windows if signal unsupported.
+try {
+  process.on('SIGHUP', () => {
+    try {
+      const pf = reloadPolicy();
+      audit('policy_reloaded', { source: 'sighup', actions: Object.keys(pf.actions||{}).length, hash: (pf as any).policy_hash });
+      incCounter('policy_reloads_total',{ source: 'sighup' });
+    } catch (e) {
+      audit('policy_reload_failed',{ source:'sighup', error:String(e) });
+    }
+  });
+} catch {/* no-op */}
