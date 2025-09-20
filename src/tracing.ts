@@ -7,11 +7,12 @@
  *
  * Future: OTLP exporter (grpc/http) when env OTLP_ENDPOINT provided.
  */
-import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
-import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { SimpleSpanProcessor } from '@opentelemetry/sdk-trace-node';
+import { diag, DiagConsoleLogger, DiagLogLevel, trace } from '@opentelemetry/api';
+import { NodeTracerProvider, SimpleSpanProcessor, ConsoleSpanExporter } from '@opentelemetry/sdk-trace-node';
 import { InMemorySpanExporter, ReadableSpan } from '@opentelemetry/sdk-trace-base';
 import { Resource } from '@opentelemetry/resources';
+// OTLP HTTP exporter (optional runtime use)
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 
 let tracerProvider: NodeTracerProvider | undefined;
 let memoryExporter: InMemorySpanExporter | undefined;
@@ -26,7 +27,6 @@ export function initTracing() {
   });
   const exporterType = process.env.TRACING_EXPORTER || 'console';
   if (exporterType === 'console') {
-    const { ConsoleSpanExporter } = require('@opentelemetry/sdk-trace-node');
     tracerProvider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
   } else if (exporterType === 'memory') {
     memoryExporter = new InMemorySpanExporter();
@@ -38,7 +38,6 @@ export function initTracing() {
   const otlpEndpoint = process.env.OTLP_ENDPOINT;
   if (otlpEndpoint) {
     try {
-      const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
       const headersEnv = process.env.OTLP_HEADERS || '';
       const headers: Record<string,string> = {};
       headersEnv.split(',').map(s=>s.trim()).filter(Boolean).forEach(pair => {
@@ -50,7 +49,7 @@ export function initTracing() {
         headers: Object.keys(headers).length ? headers : undefined,
         timeoutMillis: timeoutMs
       });
-      tracerProvider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+      tracerProvider.addSpanProcessor(new SimpleSpanProcessor(exporter as any));
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Failed to initialize OTLP exporter', e);
@@ -59,9 +58,7 @@ export function initTracing() {
   tracerProvider.register();
 }
 
-export function getTracer() {
-  return require('@opentelemetry/api').trace.getTracer('approval-service');
-}
+export function getTracer() { return trace.getTracer('approval-service'); }
 
 export async function shutdownTracing() {
   if (tracerProvider) await tracerProvider.shutdown().catch(()=>{});

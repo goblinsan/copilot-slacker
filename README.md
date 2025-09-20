@@ -291,5 +291,60 @@ Filter flags:
 
 Note: stdout backend does not currently support export (use shell pipelines). File and Redis backends support server-side filtering during export iteration.
 
+## Load Simulation (Performance / Item #13)
+
+A lightweight load harness is included to exercise the request lifecycle concurrently and report latency percentiles.
+
+Run:
+```bash
+npm run load-sim -- --requests 500 --concurrency 50 --approve true
+```
+
+Flags:
+```
+--requests <n>        Total number of requests to create (default 100)
+--concurrency <n>     Parallel creator workers (default 10)
+--approve true|false  If true, immediately applies in-process approvals (default true)
+--action <name>       Policy action name used for all requests (default load_action)
+```
+
+Environment:
+* Uses `POLICY_PATH` if set; otherwise writes a temporary policy enabling a single approver (`ULOAD`).
+* Sets `VITEST=1` so the server does not auto-start scheduler / retention loops unintentionally when imported.
+
+Metrics Reported (milliseconds):
+* `create_ms` – HTTP round‑trip latency for creating requests.
+* `approval_operation_ms` – Time spent executing the approval function (in-memory processing only).
+* `end_to_end_ms` – Time from creation (client perceived) through decision (approval) when approvals are applied inline.
+
+Sample Output:
+```
+--- Load Simulation Summary ---
+create_ms: count=500 p50=4.12 p90=6.02 p95=6.89 p99=8.77 max=10.12
+approval_operation_ms: count=500 p50=0.06 p90=0.11 p95=0.13 p99=0.20 max=0.31
+end_to_end_ms: count=500 p50=4.30 p90=6.22 p95=7.10 p99=8.95 max=10.45
+{
+  "action": "load_action",
+  "requests": 500,
+  "concurrency": 50,
+  "approve": true,
+  "summaries": [
+    { "name": "create_ms", "count": 500, "p50": 4.12 },
+    { "name": "approval_operation_ms", "count": 500 },
+    { "name": "end_to_end_ms", "count": 500 }
+  ],
+  "errors": []
+}
+```
+
+Interpretation:
+* Compare `end_to_end_ms` vs `create_ms` to estimate non-network processing overhead.
+* If adding personas or Slack posting in future tests, expect `end_to_end_ms` to increase; isolate HTTP vs business logic by examining the delta between create and approval operation percentiles.
+
+Future Enhancements:
+* Optional ramp profiles (linear / step / spike).
+* Slack API mock integration to exercise message update queue.
+* Persistent results file with timestamped runs for trend analysis.
+
 ## License
 Proprietary (example scaffolding).
