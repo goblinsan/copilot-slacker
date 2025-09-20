@@ -388,6 +388,13 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         incCounter('param_overrides_total',{ action: record.action, outcome: 'rejected' });
         return json(res,200,{ response_action:'errors', errors:{ _ : `Schema validation failed: ${schemaResult.errors.slice(0,3).join('; ')}` } });
       }
+      const debug = process.env.APPROVAL_DEBUG === '1';
+      if (debug) {
+        try {
+          const preList = (Store.approvalsFor as any)(record.id);
+          audit('override_pre_approval_state', { request_id: record.id, actor: userId, status: record.status, count: record.approvals_count, list_len: Array.isArray(preList)? preList.length: undefined });
+        } catch {/* ignore */}
+      }
       // Apply overrides to redacted_params and recompute payload_hash BEFORE approval so approval sees final params
       const newParams = { ...record.redacted_params, ...overrides };
       record.redacted_params = newParams;
@@ -396,6 +403,12 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       const approval = applyApproval(record, userId);
       if (!approval.ok) {
         return json(res,200,{ response_action:'errors', errors:{ _ : errorMessage(approval.error) } });
+      }
+      if (debug) {
+        try {
+          const postList = (Store.approvalsFor as any)(record.id);
+          audit('override_post_approval_state', { request_id: record.id, actor: userId, status: record.status, count: record.approvals_count, list_len: Array.isArray(postList)? postList.length: undefined });
+        } catch {/* ignore */}
       }
       const diff: Record<string,{ before: unknown; after: unknown }> = {};
       for (const k of Object.keys(overrides)) diff[k] = { before: before[k], after: overrides[k] };

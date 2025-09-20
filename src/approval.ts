@@ -7,6 +7,14 @@ import { incCounter, observeDecisionLatency } from './metrics.js';
 export type ApprovalResult = { ok: true; terminal?: boolean } | { ok: false; error: string };
 
 export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalResult {
+  // Debug pre-state snapshot (guarded by env flag to reduce noise in normal runs)
+  const debug = process.env.APPROVAL_DEBUG === '1';
+  if (debug) {
+    try {
+      const preList = (Store.approvalsFor as any)(req.id);
+      audit('approval_pre_state', { request_id: req.id, actor, count: req.approvals_count, list_len: Array.isArray(preList)? preList.length : undefined, store_instance: getStoreInstanceId?.(), status: req.status });
+    } catch {/* ignore */}
+  }
   if (!req.allowed_approver_ids.includes(actor)) {
     audit('unauthorized_approval_attempt', { request_id: req.id, actor });
     return { ok: false, error: 'not_authorized' };
@@ -36,6 +44,12 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     decision: 'approved',
     created_at: new Date().toISOString()
   });
+  if (debug) {
+    try {
+      const midList = (Store.approvalsFor as any)(req.id);
+      audit('approval_mid_state', { request_id: req.id, actor, prevCount, after_add: req.approvals_count, list_len: Array.isArray(midList)? midList.length : undefined, store_instance: getStoreInstanceId?.() });
+    } catch {/* ignore */}
+  }
   // Fallback: if backend did not mutate req.approvals_count (e.g., different object instance), recompute.
   if (req.approvals_count === prevCount) {
     try {
@@ -62,6 +76,22 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     }
   } catch { /* ignore */ }
   audit('approval_added', { request_id: req.id, actor, count: req.approvals_count, store_instance: getStoreInstanceId?.() });
+  if (debug) {
+    try {
+      const postList = (Store.approvalsFor as any)(req.id);
+      audit('approval_post_state', { request_id: req.id, actor, count: req.approvals_count, list_len: Array.isArray(postList)? postList.length : undefined, store_instance: getStoreInstanceId?.() });
+    } catch {/* ignore */}
+  }
+  // Final defensive guard: if min_approvals == 1 but count is still 0 after all recomputes, force correction
+  if (req.min_approvals === 1 && req.approvals_count === 0) {
+    try {
+      const finalList = (Store.approvalsFor as any)(req.id);
+      if (Array.isArray(finalList) && finalList.includes(actor)) {
+        audit('approval_forced_correction', { request_id: req.id, actor, reason: 'zero_count_anomaly', store_instance: getStoreInstanceId?.() });
+        (req as any).approvals_count = 1;
+      }
+    } catch { /* swallow */ }
+  }
   if (req.approvals_count >= req.min_approvals) {
     req.status = 'approved';
     req.decided_at = new Date().toISOString();
