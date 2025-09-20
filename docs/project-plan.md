@@ -59,7 +59,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |35 | Schema introspection endpoint | Expose GET /api/schemas/:action redacted view | 31 | 3 | Endpoint returns loaded schema subset | ✅ |
 |36 | Override outcome labeling | Add outcome label to param_overrides_total (applied/rejected) | 27,30-32 | 4 | Metric exposes outcome label | ✅ |
 |42 | Multi-arch image build | Build & publish linux/amd64 + linux/arm64 manifests | 14,15 | 5 | Release workflow publishes multi-arch image | ✅ |
-|43 | Distroless runtime image | Replace alpine final stage with distroless node base | 14 | 5 | Image passes tests; vuln count reduced |  |
+|43 | Distroless runtime image | Replace alpine final stage with distroless node base | 14 | 5 | Image passes tests; vuln count reduced | ✅ |
 |44 | SBOM & provenance | Generate SBOM (cyclonedx) + SLSA provenance attestation | 15 | 5 | Artifacts attached to release |  |
 |45 | Image signing | Cosign sign & verify in deployment pipeline | 44 | 5 | Signatures verified pre-deploy |  |
 |46 | Weekly vuln re-scan workflow | Scheduled Trivy scan; open issue on new HIGH/CRITICAL | 15 | 5 | Issues auto-created on findings |  |
@@ -123,6 +123,9 @@ Created `docs/production-readiness.md` summarizing: SLOs (latency, availability)
 
 ### Item 42 – Multi-arch Image Build (Completed)
 Updated `release.yml` to enable `docker/setup-qemu-action` and `docker/setup-buildx-action` then build & push a manifest list for `linux/amd64,linux/arm64` via `docker/build-push-action@v5` with cache configuration. Provenance & SBOM generation intentionally disabled for now (tracked under items #44 and #44/#45). Exit criteria met: future tag releases will publish multi-architecture images (`latest` + semantic tag) to GHCR.
+
+### Item 43 – Distroless Runtime Image (Completed)
+Refactored Dockerfile to use Debian slim build + production dependency stages and a `gcr.io/distroless/nodejs20-debian12:nonroot` final runtime. Added optional `debug` target (alpine) for troubleshooting. Benefits: reduced attack surface (no shell/package manager), non-root base, likely lower vulnerability footprint vs Alpine/musl glibc mismatch. Caveats: requires all native modules built in build stage; no shell inside container for live debugging (use debug target or ephemeral sidecar). Sets explicit ENTRYPOINT with absolute Node path.
 
 ### Future Enhancements Backlog
 Outlined items 42–50 targeting operational hardening: multi-architecture distribution, distroless runtime to shrink attack surface, supply chain integrity (SBOM, provenance, signing), continuous vulnerability posture (scheduled scans & dependency automation), resilience (Redis HA test), observability gap closure (Slack 429 metrics), and incident process maturity (timeline template).

@@ -357,6 +357,10 @@ Build the image (multi-stage, Node 20 Alpine):
 ```bash
 docker build -t approval-service:local .
 ```
+Distroless runtime (default final stage now): The default build produces a distroless-based image (`gcr.io/distroless/nodejs20-debian12:nonroot`) for a reduced attack surface (no shell, minimal libraries). For debugging with a shell or package tools, build the `debug` target:
+```bash
+docker build -t approval-service:debug --target debug .
+```
 Multi-arch (GHCR releases): Tagged releases publish a manifest supporting `linux/amd64` and `linux/arm64` (see project plan item #42). Local manual multi-arch build example (requires buildx):
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 -t ghcr.io/<owner>/approval-service:test --push .
@@ -492,6 +496,7 @@ Notes:
 - Replace `your-registry/approval-service:latest` with a tagged image.
 - Use `STORE_BACKEND=redis` and inject `REDIS_URL` plus a Redis dependency if persistence / multi-pod reconciliation is required.
 - Scale replicas >1 only after enabling Redis to ensure consistent request state across pods.
+- Distroless image has no shell; use the `debug` target or ephemeral sidecar if interactive troubleshooting is required.
 - Add NetworkPolicies, PodSecurityStandards, and secrets management (SealedSecrets / ExternalSecrets) in production.
 
 ### Operational Considerations
