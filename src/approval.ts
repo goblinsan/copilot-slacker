@@ -4,6 +4,13 @@ import type { GuardRequestRecord } from './types.js';
 import { audit } from './log.js';
 import { incCounter, observeDecisionLatency } from './metrics.js';
 
+// Derive a stable signature of current approvals for drift / divergence diagnostics.
+// Non-goal: cryptographic integrity (simple join sufficient for debug invariants).
+function approvalsSig(list: unknown): string | undefined {
+  if (!Array.isArray(list)) return undefined;
+  return list.slice().sort().join(',');
+}
+
 export type ApprovalResult = { ok: true; terminal?: boolean } | { ok: false; error: string };
 
 export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalResult {
@@ -47,7 +54,7 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
   if (debug) {
     try {
       const midList = (Store.approvalsFor as any)(req.id);
-      audit('approval_mid_state', { request_id: req.id, actor, prevCount, after_add: req.approvals_count, list_len: Array.isArray(midList)? midList.length : undefined, store_instance: getStoreInstanceId?.() });
+      audit('approval_mid_state', { request_id: req.id, actor, prevCount, after_add: req.approvals_count, list_len: Array.isArray(midList)? midList.length : undefined, list_sig: approvalsSig(midList), store_instance: getStoreInstanceId?.() });
     } catch {/* ignore */}
   }
   // Fallback: if backend did not mutate req.approvals_count (e.g., different object instance), recompute.
@@ -79,7 +86,13 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
   if (debug) {
     try {
       const postList = (Store.approvalsFor as any)(req.id);
-      audit('approval_post_state', { request_id: req.id, actor, count: req.approvals_count, list_len: Array.isArray(postList)? postList.length : undefined, store_instance: getStoreInstanceId?.() });
+      audit('approval_post_state', { request_id: req.id, actor, count: req.approvals_count, list_len: Array.isArray(postList)? postList.length : undefined, list_sig: approvalsSig(postList), store_instance: getStoreInstanceId?.() });
+      // Invariant: approvals_count must equal list length when list available.
+      if (Array.isArray(postList) && req.approvals_count !== postList.length) {
+        audit('approval_invariant_breach', { request_id: req.id, actor, count: req.approvals_count, list_len: postList.length, list_sig: approvalsSig(postList), store_instance: getStoreInstanceId?.() });
+        // Fail fast in debug mode to surface anomaly loudly.
+        throw new Error('approval invariant breach: count!=' + postList.length);
+      }
     } catch {/* ignore */}
   }
   // Final defensive guard: if min_approvals == 1 but count is still 0 after all recomputes, force correction

@@ -44,4 +44,13 @@ describe('applyApproval', () => {
     applyApproval(r, 'U2');
     expect(r.approvals_count).toBe(2);
   });
+  it('approves immediately and maintains invariant when min_approvals=1', async () => {
+    const r = await Store.createRequest(build({ min_approvals: 1 }));
+    expect(r.approvals_count).toBe(0);
+    const res = applyApproval(r, 'U1');
+    expect(res.ok).toBe(true);
+    // Should be terminal
+    expect(r.status).toBe('approved');
+    expect(r.approvals_count).toBe(1);
+  });
 });
