@@ -35,6 +35,7 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     decision: 'approved',
     created_at: new Date().toISOString()
   });
+  // At this point in-memory store updates req.approvals_count via addApproval.
   audit('approval_added', { request_id: req.id, actor, count: req.approvals_count });
   if (req.approvals_count >= req.min_approvals) {
     req.status = 'approved';
