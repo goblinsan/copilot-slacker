@@ -14,6 +14,7 @@ import { addListener, emitState, sendEvent, broadcastForRequestId } from './sse.
 import { markAndCheckReplay } from './replay.js';
 import { isAllowed as rateLimitAllowed } from './ratelimit.js';
 import { validateOverrides, totalOverrideCharSize } from './override-schema.js';
+import { withSpan, initTracing } from './tracing.js';
 
 const POLICY_PATH = process.env.POLICY_PATH || '.agent/policies/guards.yml';
 const policyFile = loadPolicy(POLICY_PATH);
@@ -49,6 +50,8 @@ function ensureServer() {
 }
 
 async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
+  // Lazy tracing init (idempotent) to avoid requiring explicit call in startup path
+  if (process.env.TRACING_ENABLED === 'true') initTracing();
   // If client cert required, reject unauthorized early
   if (process.env.REQUIRE_CLIENT_CERT === 'true') {
     const socket: any = req.socket as any;
@@ -113,6 +116,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
   }
   // Re-request lineage endpoint
   if (req.method === 'POST' && req.url === '/api/guard/rerequest') {
+    return withSpan('request.rerequest', async span => {
     const body = await readBody(req);
     let parsed: any; try { parsed = JSON.parse(body); } catch { return json(res,400,{error:'invalid_payload'}); }
     const { originalRequestId, actor } = parsed || {};
@@ -121,6 +125,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     if (!original) return json(res,404,{error:'not_found'});
     const evalResult = evaluate(original.action, policyFile);
     if (!evalResult || !evalResult.policy.allowReRequest) return json(res,403,{error:'not_allowed'});
+    span.setAttribute?.('action', original.action);
     const cooldown = evalResult.policy.reRequestCooldownSec || 0;
     const lineageId = original.lineage_id || original.id;
     const lineage = (await Store.listLineageRequests?.(lineageId)) || [];
@@ -176,9 +181,12 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         await Store.setSlackMessage(rec.id, ids.channel, ids.ts);
       }).catch(err => audit('slack_post_error',{error:String(err)}));
     }
+    span.setAttribute?.('request_id', rec.id);
     return json(res,200,{ token, requestId: rec.id, lineageId, status: rec.status, expiresAt });
+    });
   }
   if (req.method === 'POST' && req.url === '/api/guard/request') {
+    return withSpan('request.create', async span => {
     // Rate limit by remote address
     const ip = (req.socket.remoteAddress || 'unknown').replace('::ffff:','');
     if (!rateLimitAllowed(ip)) {
@@ -189,6 +197,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     let parsed; try { parsed = CreateRequestInputSchema.parse(JSON.parse(body)); } catch (e:any) { return json(res,400,{error:'invalid_payload',details:e.message}); }
     const evalResult = evaluate(parsed.action, policyFile);
     if (!evalResult) return json(res,403,{error:'policy_denied'});
+    span.setAttribute?.('action', parsed.action);
     const token = crypto.randomUUID();
     const nowMs = Date.now();
     const expiresAt = new Date(nowMs + evalResult.timeoutSec * 1000).toISOString();
@@ -239,7 +248,9 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
   // dynamic import to avoid cycle
   // note: emitState already guards missing
   import('./sse.js').then(m => m.emitState(rec.token)).catch(()=>{});
+    span.setAttribute?.('request_id', rec.id);
     return json(res,200,{ token, requestId: rec.id, status: rec.status, expiresAt, policy: { minApprovals: rec.min_approvals, requiredPersonas: rec.required_personas, timeoutSec: evalResult.timeoutSec } });
+    });
   }
   if (req.url?.startsWith('/api/guard/wait-sse')) {
     if (req.method === 'GET') {
@@ -278,6 +289,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     }
   }
   if (req.method === 'POST' && req.url === '/api/slack/interactions') {
+    return withSpan('slack.interaction', async span => {
     // Parse form-encoded body
     const rawBody = await readBody(req);
     const params = new URLSearchParams(rawBody);
@@ -287,21 +299,24 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     const ts = req.headers['x-slack-request-timestamp'] as string || '';
     const sig = req.headers['x-slack-signature'] as string || '';
     const signingSecret = process.env.SLACK_SIGNING_SECRET || '';
-  if(!verifySlackSignature(signingSecret, rawBody, ts, sig)) { incCounter('security_events_total',{ type:'bad_signature' }); return json(res,400,{error:'bad_signature'}); }
+    if(!verifySlackSignature(signingSecret, rawBody, ts, sig)) { incCounter('security_events_total',{ type:'bad_signature' }); span.setAttribute?.('error','bad_signature'); return json(res,400,{error:'bad_signature'}); }
     // Enforce timestamp skew (±300s)
     const nowSec = Math.floor(Date.now()/1000);
     const tsNum = Number(ts);
-  if (!tsNum || Math.abs(nowSec - tsNum) > 300) { incCounter('security_events_total',{ type:'stale_signature' }); return json(res,400,{error:'stale_signature'}); }
+    if (!tsNum || Math.abs(nowSec - tsNum) > 300) { incCounter('security_events_total',{ type:'stale_signature' }); span.setAttribute?.('error','stale_signature'); return json(res,400,{error:'stale_signature'}); }
     // Replay detection
-  if (markAndCheckReplay(sig, ts)) { incCounter('security_events_total',{ type:'replay' }); return json(res,400,{error:'replay_detected'}); }
+    if (markAndCheckReplay(sig, ts)) { incCounter('security_events_total',{ type:'replay' }); span.setAttribute?.('error','replay'); return json(res,400,{error:'replay_detected'}); }
     let parsed; try { parsed = JSON.parse(payload); } catch { return json(res,400,{error:'invalid_json'}); }
     // Handle modal submission
     if (parsed.type === 'view_submission' && parsed.view?.callback_id === 'override_submit') {
+      span.updateName?.('slack.override_submit');
       const metaRaw = parsed.view.private_metadata;
       let meta: any = {}; try { meta = JSON.parse(metaRaw);} catch {}
       const requestId = meta.request_id;
       const record = await Store.getById(requestId);
       if(!record) return json(res,200,{});
+      span.setAttribute?.('request_id', record.id);
+      span.setAttribute?.('action', record.action);
       const userId = parsed.user?.id as string;
       if(!record.allowed_approver_ids.includes(userId)) {
         return json(res,200,{ response_action:'errors', errors: { _:'Not authorized'} });
@@ -372,10 +387,13 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     const userId = parsed.user?.id as string;
     const record = await Store.getById(requestId);
     if(!record) return json(res,200,{});
+    span.setAttribute?.('request_id', record.id);
+    span.setAttribute?.('action', record.action);
     let result; let personaChanged = false;
     if (actionId === 'approve') result = applyApproval(record, userId);
     else if (actionId === 'deny') result = applyDeny(record, userId);
     else if (actionId === 'approve_edit') {
+      span.updateName?.('slack.approve_edit');
       if(!record.allow_param_overrides || !record.override_keys?.length) {
         return json(res,200,{ response_type:'ephemeral', text: 'Overrides not enabled for this action.' });
       }
@@ -405,6 +423,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       return json(res,200,{});
     }
     else if (actionId.startsWith('persona_ack:')) {
+      span.updateName?.('slack.persona_ack');
       const persona = actionId.split(':')[1];
       if (record.required_personas.includes(persona) && record.persona_state[persona] === 'pending') {
         await Store.updatePersonaState(record.id, persona, 'ack', userId);
@@ -422,6 +441,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       try { await updateRequestMessage(record); } catch (e) { audit('slack_update_error',{ error:String(e), request_id: record.id }); }
     }
     return json(res,200,{});
+    });
   }
   // Slack view submissions (modal) share the same endpoint; payload.type === 'view_submission'
   if (req.method === 'POST' && req.url === '/api/slack/interactions') {

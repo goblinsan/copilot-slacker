@@ -27,7 +27,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 | 8 | Security hardening | Slack timestamp skew, replay guard, rate limits, mTLS option | 1 | 1 | All security tests pass; stale signatures rejected | ✅ |
 | 9 | Parameter override modal | Slack modal for Approve with edits; validate & merge | 2 | 3 | Edited params reflected in final decision payload | ✅ |
 |10 | Audit log persistence backend | Durable sink (file/Redis Stream); export tool | 4 | 4 | `audit export` returns filtered events | ✅ |
-|11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible |  |
+|11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible | (spans in progress) |
 |12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green |  |
 |13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues |  |
 |14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image published & manifests deploy locally |  |
@@ -54,6 +54,9 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |30 | Override governance policy | Enforce allowed override keys + optional diff size limit | 9 | 3 | Attempts exceeding limits rejected & audited | ✅ |
 |32 | Override diff size limit | Reject based on combined changed value length | 30 | 3 | Rejections audited with reason diff_size_exceeded | ✅ |
 |33 | Custom schema error messages | Allow per-property errorMessage override | 31 | 3 | Custom message appears in rejection audit & Slack error | ✅ |
+|34 | Override rejection counters | Add counters per rejection reason (limit/schema/diff) | 30,31,32 | 4 | /metrics exposes override_rejections_total{action,reason} |  |
+|35 | Schema introspection endpoint | Expose GET /api/schemas/:action redacted view | 31 | 3 | Endpoint returns loaded schema subset |  |
+|36 | Override outcome labeling | Add outcome label to param_overrides_total (applied/rejected) | 27,30-32 | 4 | Metric exposes outcome label |  |
 
 ## 4. Detailed Work Item Notes
 ### Item 1 – Enforce approver allowlists

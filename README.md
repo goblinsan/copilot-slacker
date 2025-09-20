@@ -222,6 +222,8 @@ Planned enhancements (see project plan items 27–30):
   - `PORT`
   - `OVERRIDE_MAX_KEYS` (optional integer; reject override submissions modifying more than this many keys)
   - `OVERRIDE_MAX_CHARS` (optional integer; reject override submissions whose combined changed value length exceeds this)
+  - `TRACING_ENABLED` (`true|false`) enable OpenTelemetry tracing (default disabled)
+  - `TRACING_EXPORTER` (`console|memory|none`) exporter selection; `memory` for tests only
   - (Schema) Place per-action JSON schema in `.agent/schemas/<action>.json` to enable validation
   - `TLS_CERT_FILE` / `TLS_KEY_FILE` (optional TLS)
   - `TLS_CA_FILE` (optional, for mTLS)
