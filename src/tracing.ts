@@ -63,3 +63,4 @@ export async function withSpan<T>(name: string, fn: (span: any) => Promise<T> | 
 
 // Test helper (only populated when TRACING_EXPORTER=memory)
 export function getCollectedSpans(): ReadableSpan[] { return memoryExporter ? memoryExporter.getFinishedSpans() : []; }
+export function resetCollectedSpans() { memoryExporter?.reset(); }
