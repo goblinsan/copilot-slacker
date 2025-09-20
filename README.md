@@ -80,10 +80,107 @@ GUARD_BASE_URL=http://localhost:3000
 npm test
 ```
 
+## Metrics
+The service exposes Prometheus metrics at `GET /metrics` (text format).
+
+Counters (unless noted all labeled by `action`; additional labels indicated):
+```
+approval_requests_total{action="<action>"}
+approvals_total{action="<action>"}
+denies_total{action="<action>"}
+expired_total{action="<action>"}
+escalations_total{action="<action>"}
+ security_events_total{type="<bad_signature|stale_signature|replay|rate_limited>"}  # label: type (no action label)
+ persona_ack_total{action="<action>",persona="<persona>"}
+```
+
+Histogram (labels: action, outcome where outcome ∈ approved|denied|expired):
+```
+decision_latency_seconds_bucket{action="<action>",outcome="<outcome>",le="..."}
+decision_latency_seconds_sum{action="<action>",outcome="<outcome>"}
+decision_latency_seconds_count{action="<action>",outcome="<outcome>"}
+```
+Represents create→terminal (approve/deny/expire) latency in seconds.
+
+Gauges:
+```
+pending_requests{action="<action>"}                # Current non-terminal requests
+open_requests_status{action="<action>",status="<status>"}  # Per-status open counts (awaiting_personas|ready_for_approval|pending...)
+oldest_open_request_age_seconds{action="<action>"} # Age in seconds of the oldest still-open request per action
+persona_pending_requests{action="<action>",persona="<persona>"} # Count of requests where persona still pending
+```
+
+Example scrape snippet:
+```bash
+curl -s http://localhost:3000/metrics | grep approval_requests_total
+```
+
+Integration (Prometheus `scrape_config` excerpt):
+```yaml
+scrape_configs:
+  - job_name: approval_service
+    static_configs:
+      - targets: ['approval-service:3000']
+```
+
+Dashboards should chart request throughput, decision latency histogram (P50/P95 derived), and escalation frequency per action.
+
+## SSE Streaming (Real-Time Updates)
+
+After creating a request the creator receives a `token` (response of `/api/guard/request`). Use the SSE endpoint to stream live state transitions until the request becomes terminal (`approved`, `denied`, or `expired`). A heartbeat event is sent every ~25 seconds to keep idle connections alive.
+
+Endpoint:
+```
+GET /api/guard/wait-sse?token=<TOKEN>
+```
+
+Example with curl:
+```
+curl -N "http://localhost:3000/api/guard/wait-sse?token=$TOKEN"
+```
+
+Sample event flow:
+```
+event: state
+data: {"status":"ready_for_approval","approvers":[]}
+
+event: state
+data: {"status":"approved","approvers":["U456"],"decidedAt":"2025-09-20T02:43:20.156Z"}
+```
+
+Node client snippet:
+```js
+import EventSource from 'eventsource';
+const es = new EventSource(`http://localhost:3000/api/guard/wait-sse?token=${token}`);
+es.addEventListener('state', ev => {
+  const data = JSON.parse(ev.data);
+  console.log('state update', data);
+  if(['approved','denied','expired'].includes(data.status)) es.close();
+});
+es.addEventListener('heartbeat', () => {/* optional keep-alive */});
+```
+
+Fallback (if proxies strip SSE): poll `GET /api/guard/wait?token=<TOKEN>` every few seconds or POST to the same path to retrieve current state.
+
 ## Security Notes
-* Verify Slack signatures before processing interactions.
-* Redact parameters according to policy.
-* Use HTTPS in production (ngrok for local).
+* Slack signature verification enforced for `/api/slack/interactions`.
+* Timestamp skew check: interactions older/newer than 300s rejected (`stale_signature`).
+* Replay protection: identical (timestamp, signature) pair within 5m rejected (`replay_detected`).
+* Per-IP rate limiting on `/api/guard/request` (default capacity=30, refill=1 token/sec).
+* Parameter redaction per policy (`allowlist` / `denylist`).
+* Use HTTPS in production. Optional mTLS:
+  - `TLS_CERT_FILE` / `TLS_KEY_FILE` to enable HTTPS
+  - `TLS_CA_FILE` (optional) provide CA for client cert verification
+  - `REQUIRE_CLIENT_CERT=true` to enforce client certificate auth (set along with CA)
+* Env vars:
+  - `RATE_LIMIT_CAPACITY` / `RATE_LIMIT_REFILL_PER_SEC`
+  - `SLACK_SIGNING_SECRET`
+  - `POLICY_PATH`
+  - `PORT`
+  - `TLS_CERT_FILE` / `TLS_KEY_FILE` (optional TLS)
+  - `TLS_CA_FILE` (optional, for mTLS)
+  - `REQUIRE_CLIENT_CERT` (true/false)
+* Future: Redis-backed replay cache & distributed rate limiting.
 
 ## License
 Proprietary (example scaffolding).

@@ -15,26 +15,34 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 6. Documentation & Polish – Item 18
 
 ## 3. Backlog (Work Items)
-| ID | Title | Description | Depends On | Phase | Exit Criteria |
-|----|-------|-------------|------------|-------|---------------|
-| 1 | Enforce approver allowlists | Only allow listed Slack IDs / superApprovers to approve/deny; persist approver IDs | — | 1 | Unauthorized user attempt rejected & logged |
-| 2 | Distinct multi-approval tracking | Track unique approvers; prevent duplicates; expose approvers array | 1 | 1 | `wait` response shows unique list; duplicates ignored |
-| 3 | Persona acknowledgment interactions | Add checklist & gating; disable Approve until all personas ack | 1 | 1 | Approve button disabled until personas ack state reached |
-| 4 | Redis persistence adapter | Replace in-memory store; TTL for pending; env `REDIS_URL` | 1 | 2 | All CRUD via Redis; restart doesn’t lose active requests |
-| 5 | Timeout & escalation scheduler | Worker to expire & escalate; post updates | 4 | 2 | Expired requests visible & escalations logged |
-| 6 | Re-request lineage & rate limiting | `lineage_id` + cooldown & per-lineage limits | 4 | 2 | Re-request button creates new request with lineage chain |
-| 7 | SSE streaming endpoint | Real-time state push; heartbeat; polling fallback | 1 | 3 | Open connection receives state transitions instantly |
-| 8 | Security hardening | Slack timestamp skew, replay guard, rate limits, mTLS option | 1 | 1 | All security tests pass; stale signatures rejected |
-| 9 | Parameter override modal | Slack modal for Approve with edits; validate & merge | 2 | 3 | Edited params reflected in final decision payload |
-|10 | Audit log persistence backend | Durable sink (file/Redis Stream); export tool | 4 | 4 | `audit export` returns filtered events |
-|11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible |
-|12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green |
-|13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues |
-|14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image published & manifests deploy locally |
-|15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push |
-|16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned |
-|17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed |
-|18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged |
+| ID | Title | Description | Depends On | Phase | Exit Criteria | Complete |
+|----|-------|-------------|------------|-------|---------------|----------|
+| 1 | Enforce approver allowlists | Only allow listed Slack IDs / superApprovers to approve/deny; persist approver IDs | — | 1 | Unauthorized user attempt rejected & logged | ✅ |
+| 2 | Distinct multi-approval tracking | Track unique approvers; prevent duplicates; expose approvers array | 1 | 1 | `wait` response shows unique list; duplicates ignored | ✅ |
+| 3 | Persona acknowledgment interactions | Add checklist & gating; disable Approve until all personas ack | 1 | 1 | Approve button disabled until personas ack state reached | ✅ |
+| 4 | Redis persistence adapter | Replace in-memory store; TTL for pending; env `REDIS_URL` | 1 | 2 | All CRUD via Redis; restart doesn’t lose active requests | ✅ |
+| 5 | Timeout & escalation scheduler | Expire requests & fire single escalation notice (`escalateBeforeSec`); threaded Slack warning & dynamic remaining time | 4 | 2 | Escalation logged once then expiration transitions request | ✅ |
+| 6 | Re-request lineage & rate limiting | `lineage_id` + cooldown & per-lineage limits | 4 | 2 | Re-request button creates new request with lineage chain | ✅ |
+| 7 | SSE streaming endpoint | Real-time state push; heartbeat; polling fallback | 1 | 3 | Open connection receives state transitions instantly | ✅ |
+| 8 | Security hardening | Slack timestamp skew, replay guard, rate limits, mTLS option | 1 | 1 | All security tests pass; stale signatures rejected |  |
+| 9 | Parameter override modal | Slack modal for Approve with edits; validate & merge | 2 | 3 | Edited params reflected in final decision payload |  |
+|10 | Audit log persistence backend | Durable sink (file/Redis Stream); export tool | 4 | 4 | `audit export` returns filtered events |  |
+|11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible |  |
+|12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green |  |
+|13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues |  |
+|14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image published & manifests deploy locally |  |
+|15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push |  |
+|16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned |  |
+|17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed |  |
+|18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged |  |
+|19 | Metrics endpoint exposure | Implement `/metrics` (Prometheus text) exporting counters; add decision latency histogram skeleton | 11 | 4 | /metrics returns 200 with counters | ✅ |
+|20 | Approval latency histogram | Measure create→terminal duration; bucket & expose | 11 | 4 | Histogram shows non-zero observations |  |
+|21 | Per-action escalation metrics | Tag counters by action & escalation state | 11 | 4 | Escalations labeled per action |  |
+|22 | Slack rate limit backoff | Queue & retry Slack API calls with exponential backoff + jitter | 8 | 4 | No dropped messages under simulated 429 |  |
+|23 | Add outcome label to latency histogram | Record decision_latency_seconds per action & outcome (approved/denied/expired) | 11,19 | 4 | Histogram entries include outcome label |  |
+|24 | Persona acknowledgment metrics | Counters & gauges for persona ack progress | 3 | 4 | persona_ack_total & persona_pending gauge present |  |
+|25 | Live in-progress duration gauge | Track avg & max age for open requests per action | 11,19 | 4 | oldest_open_request_age_seconds & avg age metrics exposed |  |
+|26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans |  |
 
 ## 4. Detailed Work Item Notes
 ### Item 1 – Enforce approver allowlists
@@ -44,7 +52,7 @@ Add runtime guard in interaction handler; ephemeral rejection for non-authorized
 Render dynamic checkbox block; each ack triggers state evaluation; only when all = ack, enable Approve buttons (or add them). Optionally show partial progress.
 
 ### Item 5 – Timeout & Escalation
-Scheduler interval: 30s. Escalation threshold: `expires_at - escalation.afterSec`. Escalation message posted once (`escalated=true`). Expiration posts status update & disables action buttons.
+Scheduler interval default: 5000ms (overridable via `SCHEDULER_INTERVAL_MS`). Each request stores `expires_at` and optional `escalate_at = expires_at - escalateBeforeSec`. When current time >= `escalate_at` (and < `expires_at`) a single threaded Slack escalation notice posts (`request_escalated` audit). When current time >= `expires_at` non-terminal requests become `expired` (`request_expired` audit) and message updates (buttons disabled). Tests cover both escalation and expiration timing.
 
 ### Item 7 – SSE Endpoint
 URL: `GET /api/guard/wait-sse?token=...`. Events: `state`, `heartbeat`. Close connection on terminal states.

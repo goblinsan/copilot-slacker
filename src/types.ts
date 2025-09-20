@@ -48,7 +48,14 @@ export interface GuardRequestRecord {
   approvals_count: number;
   required_personas: string[];
   persona_state: Record<string, 'pending'|'ack'|'rejected'>;
+  allowed_approver_ids: string[]; // snapshot of allowed approvers (allowSlackIds + superApprovers)
   expires_at: string; // ISO
+  escalate_at?: string; // ISO threshold when escalation should fire
+  escalation_channel?: string; // channel to send escalation notice (defaults to main channel if absent)
+  escalation_fired?: boolean; // guard to ensure single emission
+  escalated_at?: string; // timestamp when escalation fired
+  last_remaining_bucket?: number; // last whole-minute remaining bucket rendered to Slack
+  escalate_min_approvals?: number; // escalated min approvals target if escalation increases quorum
   created_at: string;
   decided_at?: string;
   slack_channel?: string;
@@ -100,7 +107,13 @@ export interface PolicyAction {
   timeoutSec?: number;
   redactParams?: { mode: 'allowlist'|'denylist'|'all'; keys?: string[] };
   channel?: string;
-  escalation?: { afterSec: number; fallbackUser?: string };
+  /**
+   * Escalation configuration:
+   * escalateBeforeSec: seconds BEFORE expiration when escalation should fire (must be < timeoutSec)
+   * escalationChannel: optional alternate channel; if omitted reuse primary channel
+   * fallbackUser: optional user to mention / DM fallback (future use)
+   */
+  escalation?: { escalateBeforeSec: number; escalationChannel?: string; fallbackUser?: string; escalateMinApprovals?: number };
   allowReRequest?: boolean;
   reRequestCooldownSec?: number;
 }

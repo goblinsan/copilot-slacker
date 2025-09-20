@@ -17,8 +17,8 @@ actions:
     personasRequired: ["Architect", "Reviewer"]
     timeoutSec: 1200
     escalation:
-      afterSec: 900
-      fallbackUser: "U123"
+      escalateBeforeSec: 300
+      escalationChannel: "CPRIVATE123"
   update_config:
     description: "Modify production config file"
     approvers:
@@ -36,6 +36,17 @@ actions:
     redactParams:
       mode: denylist
       keys: ["secretValue"]
+    escalation:
+      escalateBeforeSec: 600
+      escalationChannel: "CPRIVATE123"
+  rerequest_demo:
+    description: "Demo action that allows re-request lineage"
+    approvers:
+      allowSlackIds: ["U123", "U456"]
+      minApprovals: 1
+    timeoutSec: 300
+    allowReRequest: true
+    reRequestCooldownSec: 60
 routing:
   defaultChannel: "CPRIVATE123"
   dmFallbackUser: "U123"

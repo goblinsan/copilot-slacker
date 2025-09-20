@@ -33,6 +33,15 @@ function materialize(action: string, p: PolicyAction, policyFile: PolicyFile): P
   const redaction = p.redactParams || { mode: 'denylist', keys: [] };
   const channel = p.channel || policyFile.routing?.defaultChannel;
   const hash = cache.hash || 'unknown';
+  // Normalize & validate escalation
+  let escalation = p.escalation;
+  if (escalation) {
+    if (escalation.escalateBeforeSec <= 0) throw new Error('escalateBeforeSec must be > 0');
+    if (escalation.escalateBeforeSec >= timeout) throw new Error('escalateBeforeSec must be < timeoutSec');
+    if (escalation.escalateMinApprovals !== undefined && escalation.escalateMinApprovals < p.approvers.minApprovals) {
+      throw new Error('escalateMinApprovals must be >= base minApprovals');
+    }
+  }
   return {
     action,
     policy: p,
@@ -40,7 +49,7 @@ function materialize(action: string, p: PolicyAction, policyFile: PolicyFile): P
     requiredPersonas: p.personasRequired || [],
     timeoutSec: timeout,
     channel,
-    escalation: p.escalation,
+    escalation,
     redaction: { mode: redaction.mode, keys: redaction.keys || [] },
     policy_hash: hash
   };

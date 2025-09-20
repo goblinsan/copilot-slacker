@@ -1,10 +1,18 @@
 import http from 'node:http';
+import https from 'node:https';
+import fs from 'node:fs';
 import { CreateRequestInputSchema, WaitRequestInputSchema, RequestStatus, RequestStatusSchema } from './types.js';
 import { loadPolicy, evaluate } from './policy.js';
 import { Store } from './store.js';
 import { postRequestMessage, verifySlackSignature, updateRequestMessage } from './slack.js';
+import { applyApproval, applyDeny } from './approval.js';
+import { startScheduler } from './scheduler.js';
 import crypto from 'node:crypto';
 import { audit } from './log.js';
+import { incCounter, serializePrometheus } from './metrics.js';
+import { addListener, emitState, sendEvent, broadcastForRequestId } from './sse.js';
+import { markAndCheckReplay } from './replay.js';
+import { isAllowed as rateLimitAllowed } from './ratelimit.js';
 
 const POLICY_PATH = process.env.POLICY_PATH || '.agent/policies/guards.yml';
 const policyFile = loadPolicy(POLICY_PATH);
@@ -16,19 +24,184 @@ function json(res: http.ServerResponse, code: number, body: unknown) {
 
 function notFound(res: http.ServerResponse) { res.statusCode = 404; res.end('Not found'); }
 
-const server = http.createServer(async (req, res) => {
+// Server instance (HTTP by default, HTTPS if cert env vars provided)
+let server: http.Server | https.Server;
+
+function ensureServer() {
+  if (server) return;
+  const certFile = process.env.TLS_CERT_FILE;
+  const keyFile = process.env.TLS_KEY_FILE;
+  if (certFile && keyFile && fs.existsSync(certFile) && fs.existsSync(keyFile)) {
+    const requireClient = process.env.REQUIRE_CLIENT_CERT === 'true';
+    const options: https.ServerOptions = {
+      cert: fs.readFileSync(certFile),
+      key: fs.readFileSync(keyFile),
+      requestCert: requireClient,
+      rejectUnauthorized: requireClient
+    };
+    const caFile = process.env.TLS_CA_FILE;
+    if (caFile && fs.existsSync(caFile)) options.ca = fs.readFileSync(caFile);
+    server = https.createServer(options, handler);
+  } else {
+    server = http.createServer(handler);
+  }
+}
+
+async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
+  // If client cert required, reject unauthorized early
+  if (process.env.REQUIRE_CLIENT_CERT === 'true') {
+    const socket: any = req.socket as any;
+    if (!socket.authorized) { res.writeHead(401); return res.end('client_cert_required'); }
+  }
+  
   if (req.method === 'GET' && req.url?.startsWith('/healthz')) { res.end('ok'); return; }
+  if (req.method === 'GET' && req.url === '/metrics') {
+    const base = await serializePrometheus(async () => {
+      if (!Store.listOpenRequests) return {};
+      const open = await Store.listOpenRequests();
+      const byAction: Record<string, number> = {};
+      for (const r of open) byAction[r.action] = (byAction[r.action]||0)+1;
+      return byAction;
+    });
+    // Append extended gauges: open_requests_status{action,status} and oldest_open_request_age_seconds{action}
+    let extra = '';
+    if (Store.listOpenRequests) {
+      const open = await Store.listOpenRequests();
+      const statusCounts: Record<string, Record<string, number>> = {};
+      const oldestAge: Record<string, number> = {};
+      const personaPending: Record<string, Record<string, number>> = {}; // action -> persona -> count
+      const now = Date.now();
+      for (const r of open) {
+        statusCounts[r.action] ||= {};
+        statusCounts[r.action][r.status] = (statusCounts[r.action][r.status]||0)+1;
+        const created = new Date(r.created_at).getTime();
+        const ageSec = (now - created)/1000;
+        if (!oldestAge[r.action] || ageSec > oldestAge[r.action]) oldestAge[r.action] = ageSec;
+        // persona pending gauge population
+        if (r.required_personas?.length) {
+          for (const p of r.required_personas) {
+            if (r.persona_state?.[p] === 'pending') {
+              personaPending[r.action] ||= {};
+              personaPending[r.action][p] = (personaPending[r.action][p] || 0) + 1;
+            }
+          }
+        }
+      }
+      extra += '# TYPE open_requests_status gauge\n';
+      for (const [action, byStatus] of Object.entries(statusCounts)) {
+        for (const [status,count] of Object.entries(byStatus)) {
+          extra += `open_requests_status{action="${action}",status="${status}"} ${count}\n`;
+        }
+      }
+      extra += '# TYPE oldest_open_request_age_seconds gauge\n';
+      for (const [action, age] of Object.entries(oldestAge)) {
+        extra += `oldest_open_request_age_seconds{action="${action}"} ${age.toFixed(3)}\n`;
+      }
+      if (Object.keys(personaPending).length) {
+        extra += '# TYPE persona_pending_requests gauge\n';
+        for (const [action, byPersona] of Object.entries(personaPending)) {
+          for (const [persona, count] of Object.entries(byPersona)) {
+            extra += `persona_pending_requests{action="${action}",persona="${persona}"} ${count}\n`;
+          }
+        }
+      }
+    }
+    res.writeHead(200,{ 'Content-Type':'text/plain; version=0.0.4' });
+    res.end(base + extra);
+    return;
+  }
+  // Re-request lineage endpoint
+  if (req.method === 'POST' && req.url === '/api/guard/rerequest') {
+    const body = await readBody(req);
+    let parsed: any; try { parsed = JSON.parse(body); } catch { return json(res,400,{error:'invalid_payload'}); }
+    const { originalRequestId, actor } = parsed || {};
+    if (!originalRequestId || !actor) return json(res,400,{error:'missing_fields'});
+    const original = await Store.getById(originalRequestId);
+    if (!original) return json(res,404,{error:'not_found'});
+    const evalResult = evaluate(original.action, policyFile);
+    if (!evalResult || !evalResult.policy.allowReRequest) return json(res,403,{error:'not_allowed'});
+    const cooldown = evalResult.policy.reRequestCooldownSec || 0;
+    const lineageId = original.lineage_id || original.id;
+    const lineage = (await Store.listLineageRequests?.(lineageId)) || [];
+    // Rate limit: max 5 in rolling 24h (including original)
+    const dayAgo = Date.now() - 24*3600*1000;
+    const recent = lineage.filter(r => new Date(r.created_at).getTime() >= dayAgo).length + 1; // +1 for original if not in lineage list
+    if (recent >= 6) return json(res,429,{error:'rate_limited'});
+    // Cooldown: last request must be older than cooldown
+    const last = lineage.sort((a,b)=> new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] || original;
+    if (cooldown > 0 && Date.now() - new Date(last.created_at).getTime() < cooldown*1000) {
+      return json(res,429,{error:'cooldown'});
+    }
+    // Create new request reusing action/meta; treat params hashed from redacted_params (no original full params stored)
+    const token = crypto.randomUUID();
+    const nowMs = Date.now();
+    const timeoutSec = evalResult.timeoutSec;
+    const expiresAt = new Date(nowMs + timeoutSec * 1000).toISOString();
+    let escalateAt: string | undefined;
+    if (evalResult.escalation) {
+      escalateAt = new Date(nowMs + (timeoutSec - evalResult.escalation.escalateBeforeSec) * 1000).toISOString();
+    }
+    const allowedIds = [
+      ...(evalResult.policy.approvers.allowSlackIds || []),
+      ...(policyFile.defaults?.superApprovers || [])
+    ];
+    const hash = crypto.createHash('sha256').update(JSON.stringify(original.redacted_params)).digest('hex');
+    const rec = await Store.createRequest({
+      token,
+      action: original.action,
+      payload_hash: hash,
+      redacted_params: original.redacted_params,
+      meta: original.meta,
+      status: original.required_personas.length ? 'awaiting_personas' : 'ready_for_approval',
+      min_approvals: evalResult.minApprovals,
+      approvals_count: 0,
+      required_personas: evalResult.requiredPersonas,
+      persona_state: Object.fromEntries(evalResult.requiredPersonas.map(p=>[p,'pending'])),
+      allowed_approver_ids: Array.from(new Set(allowedIds)),
+      expires_at: expiresAt,
+      escalate_at: escalateAt,
+      escalation_channel: evalResult.escalation?.escalationChannel,
+      escalation_fired: false,
+      created_at: new Date().toISOString(),
+      policy_hash: evalResult.policy_hash,
+      lineage_id: lineageId
+    });
+  audit('request_rerequested',{ new_id: rec.id, lineage_id: lineageId, actor });
+  incCounter('approval_requests_total',{ action: rec.action });
+    if (evalResult.channel) {
+      postRequestMessage(rec, evalResult.channel).then(async ids => {
+        await Store.setSlackMessage(rec.id, ids.channel, ids.ts);
+      }).catch(err => audit('slack_post_error',{error:String(err)}));
+    }
+    return json(res,200,{ token, requestId: rec.id, lineageId, status: rec.status, expiresAt });
+  }
   if (req.method === 'POST' && req.url === '/api/guard/request') {
+    // Rate limit by remote address
+    const ip = (req.socket.remoteAddress || 'unknown').replace('::ffff:','');
+    if (!rateLimitAllowed(ip)) {
+      incCounter('security_events_total',{ type:'rate_limited' });
+      return json(res,429,{error:'rate_limited'});
+    }
     const body = await readBody(req);
     let parsed; try { parsed = CreateRequestInputSchema.parse(JSON.parse(body)); } catch (e:any) { return json(res,400,{error:'invalid_payload',details:e.message}); }
     const evalResult = evaluate(parsed.action, policyFile);
     if (!evalResult) return json(res,403,{error:'policy_denied'});
     const token = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + evalResult.timeoutSec * 1000).toISOString();
+    const nowMs = Date.now();
+    const expiresAt = new Date(nowMs + evalResult.timeoutSec * 1000).toISOString();
+    let escalateAt: string | undefined; let escalationChannel: string | undefined;
+    if (evalResult.escalation) {
+      escalateAt = new Date(nowMs + (evalResult.timeoutSec - evalResult.escalation.escalateBeforeSec) * 1000).toISOString();
+      escalationChannel = evalResult.escalation.escalationChannel || undefined;
+    }
     const status: RequestStatus = evalResult.requiredPersonas.length ? 'awaiting_personas' : 'ready_for_approval';
     const hash = crypto.createHash('sha256').update(JSON.stringify(parsed.params)).digest('hex');
     const redacted = redactParams(parsed.params, evalResult.redaction);
-    const rec = Store.createRequest({
+    const allowedIds = [
+      ...(evalResult.policy.approvers.allowSlackIds || []),
+      ...(policyFile.defaults?.superApprovers || [])
+    ];
+  const rec = await Store.createRequest({
       token,
       action: parsed.action,
       payload_hash: hash,
@@ -39,33 +212,64 @@ const server = http.createServer(async (req, res) => {
       approvals_count: 0,
       required_personas: evalResult.requiredPersonas,
       persona_state: Object.fromEntries(evalResult.requiredPersonas.map(p=>[p,'pending'])),
+      allowed_approver_ids: Array.from(new Set(allowedIds)),
       expires_at: expiresAt,
+      escalate_at: escalateAt,
+      escalation_channel: escalationChannel,
+      escalation_fired: false,
       created_at: new Date().toISOString(),
       policy_hash: evalResult.policy_hash
     });
     if (evalResult.channel) {
-      postRequestMessage(rec, evalResult.channel).then(ids => {
-        Store.setSlackMessage(rec.id, ids.channel, ids.ts);
+      postRequestMessage(rec, evalResult.channel).then(async ids => {
+        await Store.setSlackMessage(rec.id, ids.channel, ids.ts);
       }).catch(err => audit('slack_post_error',{error:String(err)}));
     }
-    audit('request_created',{id:rec.id, action:rec.action});
+  audit('request_created',{id:rec.id, action:rec.action});
+  incCounter('approval_requests_total',{ action: rec.action });
+  // Fire any SSE listeners waiting on this token
+  // (Token is only known to creator, but ensure consistency if listener attached quickly)
+  // We cannot map token->id easily here, emit by attempting emitState via token
+  // minimal overhead
+  // dynamic import to avoid cycle
+  // note: emitState already guards missing
+  import('./sse.js').then(m => m.emitState(rec.token)).catch(()=>{});
     return json(res,200,{ token, requestId: rec.id, status: rec.status, expiresAt, policy: { minApprovals: rec.min_approvals, requiredPersonas: rec.required_personas, timeoutSec: evalResult.timeoutSec } });
+  }
+  if (req.url?.startsWith('/api/guard/wait-sse')) {
+    if (req.method === 'GET') {
+      const url = new URL(req.url,'http://localhost');
+      const token = url.searchParams.get('token');
+      if(!token) { res.writeHead(400); return res.end('missing token'); }
+      const record = await Store.getByToken(token);
+      if(!record) { res.writeHead(404); return res.end('not found'); }
+      res.writeHead(200,{
+        'Content-Type':'text/event-stream',
+        'Cache-Control':'no-cache',
+        Connection:'keep-alive'
+      });
+      addListener(token, res);
+      // immediate state event
+      await emitState(token);
+      return; // connection held open
+    }
   }
   if (req.url?.startsWith('/api/guard/wait')) {
     if (req.method === 'GET') {
       const url = new URL(req.url,'http://localhost');
       const token = url.searchParams.get('token'); if(!token) return json(res,400,{error:'missing_token'});
-      const record = Store.getByToken(token); if(!record) return json(res,404,{error:'not_found'});
+      const record = await Store.getByToken(token); if(!record) return json(res,404,{error:'not_found'});
       // Simple long-poll fallback rather than SSE for stub
-      if(['approved','denied','expired'].includes(record.status)) return json(res,200,terminal(record));
+  if(['approved','denied','expired'].includes(record.status)) return json(res,200,await terminalAsync(record));
       setTimeout(()=>{
-        const latest = Store.getByToken(token)!; // re-check
-        json(res,200,terminal(latest));
+        Promise.resolve(Store.getByToken(token)).then(async latest => {
+          if (latest) json(res,200,await terminalAsync(latest)); else json(res,404,{error:'not_found'});
+        });
       }, 2500);
       return;
     }
     if (req.method === 'POST') {
-      const body = await readBody(req); let parsed; try { parsed = WaitRequestInputSchema.parse(JSON.parse(body)); } catch(e:any){ return json(res,400,{error:'invalid_payload'});} const record = Store.getByToken(parsed.token); if(!record) return json(res,404,{error:'not_found'}); return json(res,200,terminal(record));
+  const body = await readBody(req); let parsed; try { parsed = WaitRequestInputSchema.parse(JSON.parse(body)); } catch(e:any){ return json(res,400,{error:'invalid_payload'});} const record = await Store.getByToken(parsed.token); if(!record) return json(res,404,{error:'not_found'}); return json(res,200,await terminalAsync(record));
     }
   }
   if (req.method === 'POST' && req.url === '/api/slack/interactions') {
@@ -78,40 +282,57 @@ const server = http.createServer(async (req, res) => {
     const ts = req.headers['x-slack-request-timestamp'] as string || '';
     const sig = req.headers['x-slack-signature'] as string || '';
     const signingSecret = process.env.SLACK_SIGNING_SECRET || '';
-    if(!verifySlackSignature(signingSecret, rawBody, ts, sig)) return json(res,400,{error:'bad_signature'});
+  if(!verifySlackSignature(signingSecret, rawBody, ts, sig)) { incCounter('security_events_total',{ type:'bad_signature' }); return json(res,400,{error:'bad_signature'}); }
+    // Enforce timestamp skew (±300s)
+    const nowSec = Math.floor(Date.now()/1000);
+    const tsNum = Number(ts);
+  if (!tsNum || Math.abs(nowSec - tsNum) > 300) { incCounter('security_events_total',{ type:'stale_signature' }); return json(res,400,{error:'stale_signature'}); }
+    // Replay detection
+  if (markAndCheckReplay(sig, ts)) { incCounter('security_events_total',{ type:'replay' }); return json(res,400,{error:'replay_detected'}); }
     let parsed; try { parsed = JSON.parse(payload); } catch { return json(res,400,{error:'invalid_json'}); }
     const action = parsed.actions?.[0];
     if(!action) return json(res,200,{});
-    const actionId = action.action_id;
-    const requestId = action.value;
-    const userId = parsed.user?.id;
-    const record = [...requests()].find(r => r.id === requestId);
+    const actionId = action.action_id as string;
+    const requestId = action.value as string;
+    const userId = parsed.user?.id as string;
+  const record = await Store.getById(requestId);
     if(!record) return json(res,200,{});
-    if (actionId === 'approve') {
-      if (record.status === 'ready_for_approval') {
-        record.approvals_count += 1;
-        if (record.approvals_count >= record.min_approvals) {
-          record.status = 'approved'; record.decided_at = new Date().toISOString();
-          audit('approved',{id:record.id, by:userId});
-        }
-        await updateRequestMessage(record);
-      }
-    } else if (actionId === 'deny') {
-      if (!['approved','denied','expired'].includes(record.status)) {
-        record.status = 'denied'; record.decided_at = new Date().toISOString();
-        audit('denied',{id:record.id, by:userId});
-        await updateRequestMessage(record);
+    let result; let personaChanged = false;
+    if (actionId === 'approve') result = applyApproval(record, userId);
+    else if (actionId === 'deny') result = applyDeny(record, userId);
+    else if (actionId.startsWith('persona_ack:')) {
+      const persona = actionId.split(':')[1];
+      if (record.required_personas.includes(persona) && record.persona_state[persona] === 'pending') {
+  await Store.updatePersonaState(record.id, persona, 'ack', userId);
+        incCounter('persona_ack_total',{ action: record.action, persona });
+        personaChanged = true;
+        // Transition if all ack
+        const allAck = record.required_personas.every(p => record.persona_state[p] === 'ack');
+        if (allAck && record.status === 'awaiting_personas') record.status = 'ready_for_approval';
       }
     }
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end('{}');
+    if (result && !result.ok) {
+      return json(res,200,{ response_type:'ephemeral', text: errorMessage(result.error) });
+    }
+    if (result?.ok || personaChanged) {
+      // Emit SSE update immediately (non-blocking) so clients observe transition without waiting for Slack API latency
+      broadcastForRequestId(record.id);
+      try {
+        await updateRequestMessage(record);
+      } catch (e) {
+        audit('slack_update_error',{ error:String(e), request_id: record.id });
+      }
+    }
+    return json(res,200,{});
   }
   notFound(res);
-});
+}
 
-function terminal(r: ReturnType<typeof Store.getByToken>): any {
+async function terminalAsync(rPromise: ReturnType<typeof Store.getByToken>): Promise<any> {
+  const r = await rPromise as any;
   if(!r) return { status: 'expired' };
-  return { status: r.status, approvers: [], decidedAt: r.decided_at };
+  const approvers = await Store.approvalsFor(r.id);
+  return { status: r.status, approvers, decidedAt: r.decided_at };
 }
 
 function redactParams(params: Record<string,unknown>, redaction: { mode: string; keys: string[] }) {
@@ -128,15 +349,36 @@ function redactParams(params: Record<string,unknown>, redaction: { mode: string;
 function readBody(req: http.IncomingMessage): Promise<string> { return new Promise(res => { let d=''; req.on('data',c=>d+=c); req.on('end',()=>res(d)); }); }
 
 // Iterator for local in-memory requests (helper for interactions handler)
-function* requests() { // NOT FOR PROD: expose internal map
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const storeMod = require('./store.js');
-  const map: Map<string, any> = storeMod?.Store?._requests || storeMod.requests || new Map();
-  for (const r of (map as any).values()) yield r;
+// removed legacy requests() iterator after introducing direct Store.getById
+
+function errorMessage(code: string): string {
+  switch(code){
+    case 'not_authorized': return 'You are not authorized to approve this request.';
+    case 'duplicate': return 'You already approved this request.';
+    case 'not_ready': return 'Request not ready for approval (persona gating).';
+    default: return 'Unable to process interaction.';
+  }
 }
 
-const PORT = Number(process.env.PORT || 3000);
-server.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Approval Service listening on :${PORT}`);
-});
+export function getServer() { return server; }
+export function startServer(port?: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    try {
+      ensureServer();
+      const p = port ?? Number(process.env.PORT || 3000);
+      server.listen(p, () => {
+        const addr = server.address();
+        const actual = typeof addr === 'object' && addr ? addr.port : p;
+        // eslint-disable-next-line no-console
+        console.log(`Approval Service listening on :${actual}`);
+        resolve(actual);
+      });
+    } catch (e) { reject(e); }
+  });
+}
+
+// Auto-start only outside vitest (VITEST env var is set during tests)
+if (!process.env.VITEST) {
+  startServer();
+  startScheduler();
+}
