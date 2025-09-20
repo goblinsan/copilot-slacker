@@ -207,5 +207,25 @@ Planned enhancements (see project plan items 27–30):
   - `REQUIRE_CLIENT_CERT` (true/false)
 * Future: Redis-backed replay cache & distributed rate limiting.
 
+## Audit Logging
+By default audit events (e.g., `request_created`, `request_approved`, `override_applied`) are written to stdout as NDJSON lines.
+
+Durable backends:
+* File (append-only NDJSON): set `AUDIT_BACKEND=file` and optionally `AUDIT_FILE=./audit.log.ndjson`.
+* Redis Stream: set `AUDIT_BACKEND=redis` and `REDIS_URL=redis://localhost:6379` (stream key defaults to `audit:events`, override via `AUDIT_STREAM`).
+
+Export CLI:
+```bash
+npm run audit:export -- --since=2025-09-20T00:00:00Z --event=request_approved --limit=50
+```
+
+Filter flags:
+* `--since=<ISO>` / `--until=<ISO>`
+* `--event=<name>`
+* `--action=<action>`
+* `--limit=<n>`
+
+Note: stdout backend does not currently support export (use shell pipelines). File and Redis backends support server-side filtering during export iteration.
+
 ## License
 Proprietary (example scaffolding).
