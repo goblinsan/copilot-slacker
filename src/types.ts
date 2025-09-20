@@ -62,6 +62,9 @@ export interface GuardRequestRecord {
   slack_message_ts?: string;
   policy_hash: string;
   lineage_id?: string;
+  // Parameter override capability (optional fields populated when policy allows overrides)
+  allow_param_overrides?: boolean;
+  override_keys?: string[]; // list of keys allowed to be changed via modal
 }
 
 export interface ApprovalRecord {
@@ -116,6 +119,9 @@ export interface PolicyAction {
   escalation?: { escalateBeforeSec: number; escalationChannel?: string; fallbackUser?: string; escalateMinApprovals?: number };
   allowReRequest?: boolean;
   reRequestCooldownSec?: number;
+  // Parameter overrides: when enabled a Slack modal can propose edits to a safe subset of params
+  allowParamOverrides?: boolean;
+  overrideKeys?: string[]; // explicit allowlist of keys editable; if absent and allowParamOverrides=true treat as empty (no editable keys)
 }
 
 export interface PolicyFile {
@@ -134,6 +140,7 @@ export interface PolicyEvaluationResult {
   escalation?: PolicyAction['escalation'];
   redaction: { mode: 'allowlist'|'denylist'|'all'; keys: string[] };
   policy_hash: string;
+  overrides: { allow: boolean; keys: string[] };
 }
 
 export interface SlackMessageIds { channel: string; ts: string }

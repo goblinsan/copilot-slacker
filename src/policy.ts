@@ -51,6 +51,7 @@ function materialize(action: string, p: PolicyAction, policyFile: PolicyFile): P
     channel,
     escalation,
     redaction: { mode: redaction.mode, keys: redaction.keys || [] },
-    policy_hash: hash
+    policy_hash: hash,
+    overrides: { allow: !!p.allowParamOverrides, keys: p.overrideKeys || [] }
   };
 }

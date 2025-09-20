@@ -94,7 +94,11 @@ function actionButtons(req: GuardRequestRecord) {
   if (req.status === 'approved' || req.status === 'denied' || req.status === 'expired') return [];
   const approveBtn = { type: 'button', action_id: 'approve', text: { type: 'plain_text', text: ready ? 'Approve' : 'Approve (waiting personas)' }, style: 'primary', value: req.id, ...(ready ? {} : { disabled: true }) } as any;
   const denyBtn = { type: 'button', action_id: 'deny', text: { type: 'plain_text', text: 'Deny' }, style: 'danger', value: req.id } as any;
-  return [ { type: 'actions', block_id: 'approval_actions', elements: [approveBtn, denyBtn] } ];
+  const elements: any[] = [approveBtn, denyBtn];
+  if (req.allow_param_overrides) {
+    elements.splice(1,0,{ type: 'button', action_id: 'approve_edit', text: { type: 'plain_text', text: 'Approve w/ Edits' }, value: req.id, ...(ready ? {} : { disabled: true }) });
+  }
+  return [ { type: 'actions', block_id: 'approval_actions', elements } ];
 }
 
 function timeRemainingLine(req: GuardRequestRecord): string | undefined {

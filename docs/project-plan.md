@@ -1,7 +1,7 @@
 # Approval Service Project Plan
 
 Status: Draft  
-Last Updated: 2025-09-19
+Last Updated: 2025-09-20
 
 ## 1. Overview
 This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
@@ -24,7 +24,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 | 5 | Timeout & escalation scheduler | Expire requests & fire single escalation notice (`escalateBeforeSec`); threaded Slack warning & dynamic remaining time | 4 | 2 | Escalation logged once then expiration transitions request | ✅ |
 | 6 | Re-request lineage & rate limiting | `lineage_id` + cooldown & per-lineage limits | 4 | 2 | Re-request button creates new request with lineage chain | ✅ |
 | 7 | SSE streaming endpoint | Real-time state push; heartbeat; polling fallback | 1 | 3 | Open connection receives state transitions instantly | ✅ |
-| 8 | Security hardening | Slack timestamp skew, replay guard, rate limits, mTLS option | 1 | 1 | All security tests pass; stale signatures rejected |  |
+| 8 | Security hardening | Slack timestamp skew, replay guard, rate limits, mTLS option | 1 | 1 | All security tests pass; stale signatures rejected | ✅ |
 | 9 | Parameter override modal | Slack modal for Approve with edits; validate & merge | 2 | 3 | Edited params reflected in final decision payload |  |
 |10 | Audit log persistence backend | Durable sink (file/Redis Stream); export tool | 4 | 4 | `audit export` returns filtered events |  |
 |11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible |  |
@@ -39,10 +39,14 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |20 | Approval latency histogram | Measure create→terminal duration; bucket & expose | 11 | 4 | Histogram shows non-zero observations |  |
 |21 | Per-action escalation metrics | Tag counters by action & escalation state | 11 | 4 | Escalations labeled per action |  |
 |22 | Slack rate limit backoff | Queue & retry Slack API calls with exponential backoff + jitter | 8 | 4 | No dropped messages under simulated 429 |  |
-|23 | Add outcome label to latency histogram | Record decision_latency_seconds per action & outcome (approved/denied/expired) | 11,19 | 4 | Histogram entries include outcome label |  |
-|24 | Persona acknowledgment metrics | Counters & gauges for persona ack progress | 3 | 4 | persona_ack_total & persona_pending gauge present |  |
-|25 | Live in-progress duration gauge | Track avg & max age for open requests per action | 11,19 | 4 | oldest_open_request_age_seconds & avg age metrics exposed |  |
+|23 | Add outcome label to latency histogram | Record decision_latency_seconds per action & outcome (approved/denied/expired) | 11,19 | 4 | Histogram entries include outcome label | ✅ |
+|24 | Persona acknowledgment metrics | Counters & gauges for persona ack progress | 3 | 4 | persona_ack_total & persona_pending gauge present | ✅ |
+|25 | Live in-progress duration gauge | Track avg & max age for open requests per action | 11,19 | 4 | oldest_open_request_age_seconds & avg age metrics exposed | ✅ |
 |26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans |  |
+|27 | Parameter override metrics | Counter param_overrides_total{action} & label outcome | 9 | 4 | Metric increments on successful override submission |  |
+|28 | Metrics reference documentation | Dedicated docs/metrics.md detailing each metric & labels | 11,19,23,24,25 | 4 | File published & linked from README |  |
+|29 | Distributed replay/rate limit cache | Redis-backed replay + rate limit synchronization | 4,8 | 4 | Replay & rate limits function across multi-instance |  |
+|30 | Override governance policy | Enforce allowed override keys + optional diff size limit | 9 | 3 | Attempts exceeding limits rejected & audited |  |
 
 ## 4. Detailed Work Item Notes
 ### Item 1 – Enforce approver allowlists

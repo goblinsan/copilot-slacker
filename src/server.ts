@@ -164,7 +164,9 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       escalation_fired: false,
       created_at: new Date().toISOString(),
       policy_hash: evalResult.policy_hash,
-      lineage_id: lineageId
+        lineage_id: lineageId,
+        allow_param_overrides: evalResult.overrides.allow,
+        override_keys: evalResult.overrides.keys
     });
   audit('request_rerequested',{ new_id: rec.id, lineage_id: lineageId, actor });
   incCounter('approval_requests_total',{ action: rec.action });
@@ -218,7 +220,9 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       escalation_channel: escalationChannel,
       escalation_fired: false,
       created_at: new Date().toISOString(),
-      policy_hash: evalResult.policy_hash
+      policy_hash: evalResult.policy_hash,
+      allow_param_overrides: evalResult.overrides.allow,
+      override_keys: evalResult.overrides.keys
     });
     if (evalResult.channel) {
       postRequestMessage(rec, evalResult.channel).then(async ids => {
@@ -300,6 +304,11 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     let result; let personaChanged = false;
     if (actionId === 'approve') result = applyApproval(record, userId);
     else if (actionId === 'deny') result = applyDeny(record, userId);
+    else if (actionId === 'approve_edit') {
+      // Placeholder: future implementation will open a Slack modal using views.open
+      // For now respond ephemeral to indicate not yet implemented
+      return json(res,200,{ response_type:'ephemeral', text: 'Parameter override modal not yet implemented.' });
+    }
     else if (actionId.startsWith('persona_ack:')) {
       const persona = actionId.split(':')[1];
       if (record.required_personas.includes(persona) && record.persona_state[persona] === 'pending') {
