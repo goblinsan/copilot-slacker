@@ -335,13 +335,16 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       const requestId = meta.request_id;
       const record = await Store.getById(requestId);
       if(!record) return json(res,200,{});
+      audit('override_stage',{ request_id: record.id, actor: parsed.user?.id, stage: 'loaded_record', status: record.status, count: record.approvals_count });
       span.setAttribute?.('request_id', record.id);
       span.setAttribute?.('action', record.action);
       const userId = parsed.user?.id as string;
       if(!record.allowed_approver_ids.includes(userId)) {
+        audit('override_stage',{ request_id: record.id, actor: userId, stage: 'unauthorized' });
         return json(res,200,{ response_action:'errors', errors: { _:'Not authorized'} });
       }
       if(!record.allow_param_overrides || !record.override_keys?.length) {
+        audit('override_stage',{ request_id: record.id, actor: userId, stage: 'overrides_disabled' });
         return json(res,200,{ response_action:'errors', errors: { _:'Overrides disabled'} });
       }
       const stateValues = parsed.view.state?.values || {};
@@ -363,6 +366,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
           before[key] = (record.redacted_params as any)[key];
         }
       }
+      audit('override_stage',{ request_id: record.id, actor: userId, stage: 'parsed_overrides', changed: Object.keys(overrides).length });
       const maxKeys = process.env.OVERRIDE_MAX_KEYS ? Number(process.env.OVERRIDE_MAX_KEYS) : undefined;
       if (maxKeys !== undefined && Object.keys(overrides).length > maxKeys) {
         audit('override_rejected',{ request_id: record.id, actor: userId, changed_keys: Object.keys(overrides), reason: 'limit_exceeded', limit: maxKeys });
@@ -388,6 +392,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         incCounter('param_overrides_total',{ action: record.action, outcome: 'rejected' });
         return json(res,200,{ response_action:'errors', errors:{ _ : `Schema validation failed: ${schemaResult.errors.slice(0,3).join('; ')}` } });
       }
+      audit('override_stage',{ request_id: record.id, actor: userId, stage: 'validated', changed: Object.keys(overrides).length });
       const debug = process.env.APPROVAL_DEBUG === '1';
       if (debug) {
         try {
@@ -399,8 +404,10 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       const newParams = { ...record.redacted_params, ...overrides };
       record.redacted_params = newParams;
       record.payload_hash = crypto.createHash('sha256').update(JSON.stringify(newParams)).digest('hex');
+      audit('override_stage',{ request_id: record.id, actor: userId, stage: 'applied_overrides' });
       // Approve immediately (treat like approval with overrides). Any approvals_count anomaly will be recomputed inside applyApproval
       const approval = applyApproval(record, userId);
+      audit('override_stage',{ request_id: record.id, actor: userId, stage: 'approval_returned', ok: approval.ok });
       if (!approval.ok) {
         return json(res,200,{ response_action:'errors', errors:{ _ : errorMessage(approval.error) } });
       }
@@ -424,7 +431,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     const actionId = action.action_id as string;
     const requestId = action.value as string;
     const userId = parsed.user?.id as string;
-    const record = await Store.getById(requestId);
+  let record = await Store.getById(requestId);
     if(!record) return json(res,200,{});
     span.setAttribute?.('request_id', record.id);
     span.setAttribute?.('action', record.action);
@@ -436,11 +443,12 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       if(!record.allow_param_overrides || !record.override_keys?.length) {
         return json(res,200,{ response_type:'ephemeral', text: 'Overrides not enabled for this action.' });
       }
-      const blocks = record.override_keys.map(k => ({
+      if(!record) return json(res,200,{});
+      const blocks = record!.override_keys.map(k => ({
         type: 'input',
         block_id: `ov_${k}`,
         label: { type: 'plain_text', text: k },
-        element: { type: 'plain_text_input', action_id: 'value', initial_value: String((record.redacted_params as any)[k] ?? '') }
+        element: { type: 'plain_text_input', action_id: 'value', initial_value: String((record!.redacted_params as any)[k] ?? '') }
       }));
       try {
         await slackClient.views.open({
@@ -468,9 +476,19 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         await Store.updatePersonaState(record.id, persona, 'ack', userId);
         incCounter('persona_ack_total',{ action: record.action, persona });
         personaChanged = true;
-        const allAck = record.required_personas.every(p => record.persona_state[p] === 'ack');
+        // Re-fetch canonical in case updatePersonaState returned/modified a different stored instance
+        try {
+          const fresh = await Store.getById(record.id);
+            if (fresh && fresh !== record) {
+              audit('persona_canonical_adopted',{ request_id: record.id, actor: userId, persona, status_before: record.status, status_canonical: fresh.status });
+              record = fresh;
+            }
+        } catch {/* ignore */}
+  if(!record) { return json(res,200,{}); }
+  const allAck = record!.required_personas.every(p => record!.persona_state[p] === 'ack');
         if (allAck && record.status === 'awaiting_personas') {
           record.status = 'ready_for_approval';
+          audit('persona_ack_ready',{ request_id: record.id, actor: userId, persona, status: record.status });
         }
         try { audit('persona_ack_stage',{ request_id: record.id, actor: userId, persona, state: record.persona_state[persona], all_ack: allAck, status: record.status }); } catch {/* ignore */}
       }
