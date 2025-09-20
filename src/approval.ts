@@ -20,7 +20,10 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     audit('approval_rejected_not_ready', { request_id: req.id, actor, status: req.status });
     return { ok: false, error: 'not_ready' };
   }
-  if (Store.hasApproval(req.id, actor)) {
+  // Support both sync and async store implementations for hasApproval
+  const has = (Store.hasApproval as any)(req.id, actor);
+  const already = typeof has === 'boolean' ? has : (typeof has?.then === 'function' ? false : Boolean(has));
+  if (already) {
     audit('approval_rejected_duplicate', { request_id: req.id, actor });
     return { ok: false, error: 'duplicate' };
   }
