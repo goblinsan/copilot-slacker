@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { CreateRequestInputSchema, WaitRequestInputSchema, RequestStatus, RequestStatusSchema } from './types.js';
 import { loadPolicy, evaluate } from './policy.js';
 import { Store } from './store.js';
-import { postRequestMessage, verifySlackSignature, updateRequestMessage } from './slack.js';
+import { postRequestMessage, verifySlackSignature, updateRequestMessage, slackClient } from './slack.js';
 import { applyApproval, applyDeny } from './approval.js';
 import { startScheduler } from './scheduler.js';
 import crypto from 'node:crypto';
@@ -294,28 +294,92 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     // Replay detection
   if (markAndCheckReplay(sig, ts)) { incCounter('security_events_total',{ type:'replay' }); return json(res,400,{error:'replay_detected'}); }
     let parsed; try { parsed = JSON.parse(payload); } catch { return json(res,400,{error:'invalid_json'}); }
+    // Handle modal submission
+    if (parsed.type === 'view_submission' && parsed.view?.callback_id === 'override_submit') {
+      const metaRaw = parsed.view.private_metadata;
+      let meta: any = {}; try { meta = JSON.parse(metaRaw);} catch {}
+      const requestId = meta.request_id;
+      const record = await Store.getById(requestId);
+      if(!record) return json(res,200,{});
+      const userId = parsed.user?.id as string;
+      if(!record.allowed_approver_ids.includes(userId)) {
+        return json(res,200,{ response_action:'errors', errors: { _:'Not authorized'} });
+      }
+      if(!record.allow_param_overrides || !record.override_keys?.length) {
+        return json(res,200,{ response_action:'errors', errors: { _:'Overrides disabled'} });
+      }
+      const stateValues = parsed.view.state?.values || {};
+      const overrides: Record<string, unknown> = {};
+      for (const key of record.override_keys) {
+        const block = stateValues[`ov_${key}`];
+        const valObj = block?.value || block?.['value'];
+        const entry = block?.value || Object.values(block||{})[0];
+        const v = entry?.value;
+        if (typeof v === 'string' && v !== String((record.redacted_params as any)[key] ?? '')) {
+          overrides[key] = v;
+        }
+      }
+      // Apply overrides to redacted_params and recompute payload_hash
+      const newParams = { ...record.redacted_params, ...overrides };
+      record.redacted_params = newParams;
+      record.payload_hash = crypto.createHash('sha256').update(JSON.stringify(newParams)).digest('hex');
+      // Approve immediately (treat like approval with overrides)
+      const approval = applyApproval(record, userId);
+      if (!approval.ok) {
+        return json(res,200,{ response_action:'errors', errors:{ _ : errorMessage(approval.error) } });
+      }
+      audit('override_applied',{ request_id: record.id, actor: userId, overrides: Object.keys(overrides) });
+      incCounter('param_overrides_total',{ action: record.action });
+      broadcastForRequestId(record.id);
+      try { await updateRequestMessage(record); } catch {}
+      return json(res,200,{});
+    }
+    // Button/action interactions
     const action = parsed.actions?.[0];
     if(!action) return json(res,200,{});
     const actionId = action.action_id as string;
     const requestId = action.value as string;
     const userId = parsed.user?.id as string;
-  const record = await Store.getById(requestId);
+    const record = await Store.getById(requestId);
     if(!record) return json(res,200,{});
     let result; let personaChanged = false;
     if (actionId === 'approve') result = applyApproval(record, userId);
     else if (actionId === 'deny') result = applyDeny(record, userId);
     else if (actionId === 'approve_edit') {
-      // Placeholder: future implementation will open a Slack modal using views.open
-      // For now respond ephemeral to indicate not yet implemented
-      return json(res,200,{ response_type:'ephemeral', text: 'Parameter override modal not yet implemented.' });
+      if(!record.allow_param_overrides || !record.override_keys?.length) {
+        return json(res,200,{ response_type:'ephemeral', text: 'Overrides not enabled for this action.' });
+      }
+      const blocks = record.override_keys.map(k => ({
+        type: 'input',
+        block_id: `ov_${k}`,
+        label: { type: 'plain_text', text: k },
+        element: { type: 'plain_text_input', action_id: 'value', initial_value: String((record.redacted_params as any)[k] ?? '') }
+      }));
+      try {
+        await slackClient.views.open({
+          trigger_id: parsed.trigger_id,
+          view: {
+            type: 'modal',
+            callback_id: 'override_submit',
+            private_metadata: JSON.stringify({ request_id: record.id }),
+            title: { type: 'plain_text', text: 'Param Overrides' },
+            submit: { type: 'plain_text', text: 'Apply & Approve' },
+            close: { type: 'plain_text', text: 'Cancel' },
+            blocks
+          }
+        });
+      } catch (e) {
+        audit('slack_modal_error',{ error:String(e), request_id: record.id });
+        return json(res,200,{ response_type:'ephemeral', text: 'Failed to open override modal.' });
+      }
+      return json(res,200,{});
     }
     else if (actionId.startsWith('persona_ack:')) {
       const persona = actionId.split(':')[1];
       if (record.required_personas.includes(persona) && record.persona_state[persona] === 'pending') {
-  await Store.updatePersonaState(record.id, persona, 'ack', userId);
+        await Store.updatePersonaState(record.id, persona, 'ack', userId);
         incCounter('persona_ack_total',{ action: record.action, persona });
         personaChanged = true;
-        // Transition if all ack
         const allAck = record.required_personas.every(p => record.persona_state[p] === 'ack');
         if (allAck && record.status === 'awaiting_personas') record.status = 'ready_for_approval';
       }
@@ -324,15 +388,14 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       return json(res,200,{ response_type:'ephemeral', text: errorMessage(result.error) });
     }
     if (result?.ok || personaChanged) {
-      // Emit SSE update immediately (non-blocking) so clients observe transition without waiting for Slack API latency
       broadcastForRequestId(record.id);
-      try {
-        await updateRequestMessage(record);
-      } catch (e) {
-        audit('slack_update_error',{ error:String(e), request_id: record.id });
-      }
+      try { await updateRequestMessage(record); } catch (e) { audit('slack_update_error',{ error:String(e), request_id: record.id }); }
     }
     return json(res,200,{});
+  }
+  // Slack view submissions (modal) share the same endpoint; payload.type === 'view_submission'
+  if (req.method === 'POST' && req.url === '/api/slack/interactions') {
+    // Already parsed above normally, but if we reach here and payload is a view_submission we process overrides
   }
   notFound(res);
 }

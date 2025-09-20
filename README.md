@@ -5,6 +5,7 @@ Slack-based approval gate for LLM / agent risky operations (dependency install, 
 ## Features
 * Guarded action requests with policy-driven routing and timeouts.
 * Slack interactive Approve / Deny buttons.
+* Optional parameter override modal (policy-gated safe edits prior to approval).
 * Persona co-sign (scaffolding present; enrichment TBD).
 * Audit logging (stdout JSON lines).
 * Pluggable store (in-memory; replace with Redis adapter).
@@ -92,6 +93,7 @@ expired_total{action="<action>"}
 escalations_total{action="<action>"}
  security_events_total{type="<bad_signature|stale_signature|replay|rate_limited>"}  # label: type (no action label)
  persona_ack_total{action="<action>",persona="<persona>"}
+ param_overrides_total{action="<action>"}
 ```
 
 Histogram (labels: action, outcome where outcome ∈ approved|denied|expired):
@@ -161,6 +163,29 @@ es.addEventListener('heartbeat', () => {/* optional keep-alive */});
 ```
 
 Fallback (if proxies strip SSE): poll `GET /api/guard/wait?token=<TOKEN>` every few seconds or POST to the same path to retrieve current state.
+
+## Parameter Overrides
+When a policy action defines:
+```yaml
+actions:
+  some_action:
+    allowParamOverrides: true
+    overrideKeys: ["packages", "justification"]
+```
+the Slack message (once persona gating is satisfied) includes an `Approve w/ Edits` button. Clicking it opens a modal with inputs for each listed key, pre-populated with current redacted values. On submission:
+
+1. Only keys in `overrideKeys` are considered; others ignored even if injected.
+2. Changed values merge into `redacted_params` (no exposure of previously redacted secrets).
+3. A new `payload_hash` is computed over the merged parameters.
+4. The request is approved atomically after applying overrides (single step UX).
+5. Audit event `override_applied` records changed key names.
+6. Metric `param_overrides_total{action}` increments.
+
+Planned enhancements (see project plan items 27–30):
+* Schema validation per action (reject malformed values).
+* Governance limits (max keys changed, diff size enforcement).
+* Audit enrichment with before/after diffs (with redaction honored).
+* Outcome labeling for override metric if distinct outcomes added.
 
 ## Security Notes
 * Slack signature verification enforced for `/api/slack/interactions`.
