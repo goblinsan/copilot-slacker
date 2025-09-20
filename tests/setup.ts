@@ -8,6 +8,10 @@
  */
 
 import { beforeEach } from 'vitest';
+import { __TEST_clearStore } from '../src/store.js';
+import { resetAllMetrics } from '../src/metrics.js';
+import { clearReplayCache } from '../src/replay.js';
+import { clearRateLimits } from '../src/ratelimit.js';
 
 const BASE_ENV = { ...process.env };
 process.env.VITEST = '1';
@@ -29,6 +33,19 @@ function restoreEnv() {/* intentionally inert now */}
 // Vitest global hooks (executed once per test file load context)
 // We rely on per-file afterAll cleanup where servers/schedulers are started.
 
+let lastTestFile: string | undefined;
+
 beforeEach(() => {
-  // Placeholder for future per-test setup (e.g., faking timers). Environment no longer reset here.
+  // Detect file boundary: Vitest sets testPath in state
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const state = (globalThis as any).expect?.getState?.();
+  const current = state?.testPath as string | undefined;
+  if (current && current !== lastTestFile) {
+    // New file starting: clear store & metrics for isolation
+    __TEST_clearStore();
+    resetAllMetrics();
+    clearReplayCache();
+    clearRateLimits();
+    lastTestFile = current;
+  }
 });
