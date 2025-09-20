@@ -11,9 +11,19 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     audit('unauthorized_approval_attempt', { request_id: req.id, actor });
     return { ok: false, error: 'not_authorized' };
   }
-  if (['approved','denied','expired'].includes(req.status)) return { ok: false, error: 'terminal' };
-  if (req.status !== 'ready_for_approval') return { ok: false, error: 'not_ready' };
-  if (Store.hasApproval(req.id, actor)) return { ok: false, error: 'duplicate' };
+  if (['approved','denied','expired'].includes(req.status)) {
+    audit('approval_rejected_terminal', { request_id: req.id, actor, status: req.status });
+    return { ok: false, error: 'terminal' };
+  }
+  if (req.status !== 'ready_for_approval') {
+    // Helpful for CI debugging when status unexpectedly differs (e.g., awaiting_personas)
+    audit('approval_rejected_not_ready', { request_id: req.id, actor, status: req.status });
+    return { ok: false, error: 'not_ready' };
+  }
+  if (Store.hasApproval(req.id, actor)) {
+    audit('approval_rejected_duplicate', { request_id: req.id, actor });
+    return { ok: false, error: 'duplicate' };
+  }
   Store.addApproval({
     id: crypto.randomUUID(),
     request_id: req.id,

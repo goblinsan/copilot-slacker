@@ -33,15 +33,19 @@ function restoreEnv() {/* intentionally inert now */}
 // Vitest global hooks (executed once per test file load context)
 // We rely on per-file afterAll cleanup where servers/schedulers are started.
 
+// Perform an initial reset immediately upon setup import to ensure the very first
+// test file starts with a clean slate (important in CI ordering differences).
+__TEST_clearStore();
+resetAllMetrics();
+clearReplayCache();
+clearRateLimits();
+
 let lastTestFile: string | undefined;
 
-beforeEach(() => {
-  // Detect file boundary: Vitest sets testPath in state
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+beforeEach(async () => {
   const state = (globalThis as any).expect?.getState?.();
   const current = state?.testPath as string | undefined;
   if (current && current !== lastTestFile) {
-    // New file starting: clear store & metrics for isolation
     __TEST_clearStore();
     resetAllMetrics();
     clearReplayCache();

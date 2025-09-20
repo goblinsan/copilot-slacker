@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import './approval.test.js'; // ensure vitest environment (side-effect ok)
 import { startServer } from '../src/server.js';
 import { Store } from '../src/store.js';
 import { applyApproval } from '../src/approval.js';

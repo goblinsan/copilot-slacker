@@ -64,7 +64,7 @@ export const __INTERNAL = {};
 // ---- Test-only helpers (not part of public runtime API) ----
 // Exposed for test isolation to avoid cross-file contamination of in-memory state.
 // Safe no-ops for non-memory backends (e.g., redis) – tests expecting isolation should run single-worker.
-export async function __TEST_clearStore() {
+export function __TEST_clearStore() {
   if (process.env.VITEST !== '1') return; // guard against accidental prod invocation
   // Best-effort: if backend is memory we can reach into known fields by recreating a fresh store.
   // Simpler approach: reinitialize memory backend when not using redis.
