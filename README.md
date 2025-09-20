@@ -352,6 +352,30 @@ Future Enhancements:
 
 Production readiness criteria & go-live gates are tracked in the [Production Readiness Checklist](docs/production-readiness.md). Review it before promoting a new major release to ensure all gates (SLOs, DR test, vulnerability posture, alerts) are satisfied.
 
+### Supply Chain Transparency (SBOM & Provenance)
+Tagged releases now publish artifacts in the release workflow containing:
+* SBOM (CycloneDX JSON) describing runtime dependencies of the multi-arch image.
+* SLSA in-toto provenance attestation (build metadata: builder, recipe, source ref, digest).
+
+Retrieval:
+1. Navigate to the GitHub Actions run for the release tag.
+2. Download artifacts named `sbom-<tag>.cdx.json` and `provenance-<tag>.intoto.jsonl`.
+
+Validation ideas (manual until automated policy added):
+```bash
+# Inspect top-level SBOM components
+jq '.components | map({name,version,type})[:10]' sbom-v0.1.0.cdx.json
+
+# Verify image digest referenced in provenance matches pulled image digest
+ACTUAL=$(docker pull ghcr.io/<owner>/approval-service:v0.1.0 | awk '/Digest/ {print $2}')
+grep -q "$ACTUAL" provenance-v0.1.0.intoto.jsonl && echo "Digest matches provenance" || echo "Mismatch" >&2
+```
+
+Upcoming enhancements:
+* (#45) Image signing (Cosign) to allow `cosign verify-attestation` against provenance.
+* Registry-attached SBOM (OCI ref) and automated vulnerability diff gating.
+* Policy evaluation of provenance predicate (builder identity, source repo) during deploy.
+
 ### Docker
 Build the image (multi-stage, Node 20 Alpine):
 ```bash

@@ -60,7 +60,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |36 | Override outcome labeling | Add outcome label to param_overrides_total (applied/rejected) | 27,30-32 | 4 | Metric exposes outcome label | ✅ |
 |42 | Multi-arch image build | Build & publish linux/amd64 + linux/arm64 manifests | 14,15 | 5 | Release workflow publishes multi-arch image | ✅ |
 |43 | Distroless runtime image | Replace alpine final stage with distroless node base | 14 | 5 | Image passes tests; vuln count reduced | ✅ |
-|44 | SBOM & provenance | Generate SBOM (cyclonedx) + SLSA provenance attestation | 15 | 5 | Artifacts attached to release |  |
+|44 | SBOM & provenance | Generate SBOM (cyclonedx) + SLSA provenance attestation | 15 | 5 | Artifacts attached to release | ✅ |
 |45 | Image signing | Cosign sign & verify in deployment pipeline | 44 | 5 | Signatures verified pre-deploy |  |
 |46 | Weekly vuln re-scan workflow | Scheduled Trivy scan; open issue on new HIGH/CRITICAL | 15 | 5 | Issues auto-created on findings |  |
 |47 | Dependency update automation | Renovate/Dependabot config enabling PRs | 15 | 5 | Automated upgrade PRs merged after CI |  |
@@ -126,6 +126,9 @@ Updated `release.yml` to enable `docker/setup-qemu-action` and `docker/setup-bui
 
 ### Item 43 – Distroless Runtime Image (Completed)
 Refactored Dockerfile to use Debian slim build + production dependency stages and a `gcr.io/distroless/nodejs20-debian12:nonroot` final runtime. Added optional `debug` target (alpine) for troubleshooting. Benefits: reduced attack surface (no shell/package manager), non-root base, likely lower vulnerability footprint vs Alpine/musl glibc mismatch. Caveats: requires all native modules built in build stage; no shell inside container for live debugging (use debug target or ephemeral sidecar). Sets explicit ENTRYPOINT with absolute Node path.
+
+### Item 44 – SBOM & Provenance (Completed)
+Enhanced `release.yml` to generate a CycloneDX SBOM (anchore/sbom-action) for the pushed multi-arch image and produce an in-toto SLSA provenance attestation (slsa-framework generator). Added `id-token: write` permission for OIDC signing. Captured final image digest via `docker buildx imagetools inspect` and published both SBOM and provenance as workflow artifacts (`sbom-<tag>.cdx.json`, `provenance-<tag>.intoto.jsonl`). These artifacts establish supply chain transparency foundations prior to image signing (item #45). Future improvement: attach SBOM/provenance directly to GitHub Release assets and optionally store SBOM in OCI registry (`oci:application/vnd.cyclonedx+json`).
 
 ### Future Enhancements Backlog
 Outlined items 42–50 targeting operational hardening: multi-architecture distribution, distroless runtime to shrink attack surface, supply chain integrity (SBOM, provenance, signing), continuous vulnerability posture (scheduled scans & dependency automation), resilience (Redis HA test), observability gap closure (Slack 429 metrics), and incident process maturity (timeline template).
