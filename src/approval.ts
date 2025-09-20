@@ -61,6 +61,26 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
   observeDecisionLatency(latencySec,{ action: req.action, outcome: 'approved' });
     return { ok: true, terminal: true };
   }
+  // Defensive quorum recompute: if approvals_count below quorum but data store actually has enough unique approvers
+  try {
+    const approvers = (Store.approvalsFor as any)(req.id);
+    if (Array.isArray(approvers)) {
+      const unique = new Set(approvers);
+      if (unique.size >= req.min_approvals && req.status === 'ready_for_approval') {
+        audit('approval_quorum_recomputed', { request_id: req.id, actor, observed_count: req.approvals_count, unique_size: unique.size });
+        req.approvals_count = unique.size;
+        req.status = 'approved';
+        req.decided_at = new Date().toISOString();
+        audit('request_approved', { request_id: req.id, actor, recompute: true });
+        incCounter('approvals_total',{ action: req.action });
+        const latencySec2 = (new Date(req.decided_at).getTime() - new Date(req.created_at).getTime())/1000;
+        observeDecisionLatency(latencySec2,{ action: req.action, outcome: 'approved' });
+        return { ok: true, terminal: true };
+      }
+    }
+  } catch {
+    // ignore recompute errors
+  }
   return { ok: true };
 }
 
