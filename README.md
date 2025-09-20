@@ -348,6 +348,8 @@ Future Enhancements:
 
 ## Deployment
 
+(See detailed operational procedures in [Operational Runbook](docs/runbook.md))
+
 ### Docker
 Build the image (multi-stage, Node 20 Alpine):
 ```bash

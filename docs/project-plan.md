@@ -1,7 +1,7 @@
 # Approval Service Project Plan
 
 Status: Draft  
-Last Updated: 2025-09-20 (completed items 13,14,15,37,39,40,41; retention, archival, load baseline, deployment packaging & CI/CD added)
+Last Updated: 2025-09-20 (completed items 13,14,15,16,37,39,40,41; retention, archival, load baseline, deployment packaging, CI/CD & runbook added)
 
 ## 1. Overview
 This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
@@ -32,7 +32,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues | ✅ |
 |14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image builds locally; Dockerfile + readiness (`/readyz`) + env validation module merged | ✅ |
 |15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push | ✅ |
-|16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned |  |
+|16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned | ✅ |
 |17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed |  |
 |18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged |  |
 |19 | Metrics endpoint exposure | Implement `/metrics` (Prometheus text) exporting counters; add decision latency histogram skeleton | 11 | 4 | /metrics returns 200 with counters | ✅ |
@@ -106,12 +106,8 @@ Implemented GitHub Actions:
 * `release.yml` on tag `v*`: build dist, Docker metadata, GHCR login via `GITHUB_TOKEN`, build & push image with both `latest` and semantic tag, post-push Trivy scan.
 Caching: `actions/setup-node` npm cache. Future enhancements: provenance attestations (SLSA), dependency review gating, multi-arch manifest (`linux/amd64, linux/arm64`), weekly vulnerability re-scan job.
 
-### Item 16 – Runbook Sections
-1. Secrets rotation steps.
-2. Policy reload procedure.
-3. Redis failover verification.
-4. Approval latency SLO investigation.
-5. Slack outage / degraded mode (queue requests; poll fallback).
+### Item 16 – Operational Runbook (Completed)
+Created `docs/runbook.md` covering: system overview, secrets rotation, policy reload mechanisms, Redis failover diagnostics, escalation & timeout tuning, latency SLO investigation methodology, Slack outage mitigations, retention & archival operations, backup & restore guidance, on-call alert catalog with triage steps, metrics dashboard recommendations, troubleshooting playbooks, capacity planning, forward hardening roadmap (multi-arch, distroless, cosign, rate limit metrics), change management, and contacts. Future enhancements: add live incident timeline template, per-metric SLO doc, and automation scripts for common diagnostics.
 
 ### Item 17 – Production Readiness Checklist
 * Security review signoff
