@@ -1,7 +1,7 @@
 # Approval Service Project Plan
 
 Status: Draft  
-Last Updated: 2025-09-20
+Last Updated: 2025-09-20 (updated backlog items 20,21,27; added 37-41; metrics label clarification)
 
 ## 1. Overview
 This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
@@ -36,14 +36,19 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed |  |
 |18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged |  |
 |19 | Metrics endpoint exposure | Implement `/metrics` (Prometheus text) exporting counters; add decision latency histogram skeleton | 11 | 4 | /metrics returns 200 with counters | ✅ |
-|20 | Approval latency histogram | Measure create→terminal duration; bucket & expose | 11 | 4 | Histogram shows non-zero observations |  |
-|21 | Per-action escalation metrics | Tag counters by action & escalation state | 11 | 4 | Escalations labeled per action |  |
+|20 | Approval latency histogram | Measure create→terminal duration; bucket & expose (now labeled with outcome) | 11 | 4 | Histogram shows non-zero observations | ✅ |
+|21 | Per-action escalation metrics | Tag counters by action & escalation state | 11 | 4 | Escalations labeled per action | ✅ |
 |22 | Slack rate limit backoff | Queue & retry Slack API calls with exponential backoff + jitter | 8 | 4 | No dropped messages under simulated 429 |  |
 |23 | Add outcome label to latency histogram | Record decision_latency_seconds per action & outcome (approved/denied/expired) | 11,19 | 4 | Histogram entries include outcome label | ✅ |
 |24 | Persona acknowledgment metrics | Counters & gauges for persona ack progress | 3 | 4 | persona_ack_total & persona_pending gauge present | ✅ |
 |25 | Live in-progress duration gauge | Track avg & max age for open requests per action | 11,19 | 4 | oldest_open_request_age_seconds & avg age metrics exposed | ✅ |
 |26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans | ✅ |
-|27 | Parameter override metrics | Counter param_overrides_total{action} & label outcome | 9 | 4 | Metric increments on successful override submission |  |
+|27 | Parameter override metrics | Counter param_overrides_total{action,outcome} (applied/rejected) | 9 | 4 | Metric increments on successful override submission / rejection labeled | ✅ |
+|37 | Trace span assertion tests | Add tests ensuring critical spans emitted (create, approve, expire, escalate, slack.post/update) | 26 | 4 | Tests fail if span names missing |  |
+|38 | OTLP trace exporter option | Env toggle to export spans to OTLP endpoint | 11,26 | 4 | Spans visible in external collector when configured |  |
+|39 | Slack rate limit queue v2 | Coalesce rapid consecutive message updates & jitter backoff | 22 | 4 | Reduced duplicate updates under churn |  |
+|40 | Policy hot-reload | Reload policies from disk/Redis on SIGHUP or admin endpoint | 10 | 4 | Policy changes applied without restart |  |
+|41 | Retention & archival policy | TTL + archival export for audit + requests | 10 | 4 | Documented retention config & automated purge |  |
 |28 | Metrics reference documentation | Dedicated docs/metrics.md detailing each metric & labels | 11,19,23,24,25 | 4 | File published & linked from README | ✅ |
 |29 | Distributed replay/rate limit cache | Redis-backed replay + rate limit synchronization | 4,8 | 4 | Replay & rate limits function across multi-instance |  |
 |30 | Override governance policy | Enforce allowed override keys + optional diff size limit | 9 | 3 | Attempts exceeding limits rejected & audited | ✅ |
@@ -144,7 +149,7 @@ Prometheus naming convention: snake_case, base unit seconds where temporal.
 | denies_total | counter | action | Count of denies |
 | expired_total | counter | action | Count of expired requests |
 | escalations_total | counter | action | Escalation notifications sent |
-| decision_latency_seconds | histogram | action | Time from request create → terminal state |
+| decision_latency_seconds | histogram | action, outcome | Time from request create → terminal state (labeled by terminal outcome) |
 | pending_requests | gauge | action | Current non-terminal requests |
 | param_overrides_total | counter | action, outcome | Override submissions by outcome (applied/rejected) |
 | override_rejections_total | counter | action, reason | Override rejection reasons (limit_exceeded, diff_size_exceeded, schema_validation) |
