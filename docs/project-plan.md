@@ -42,21 +42,17 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |23 | Add outcome label to latency histogram | Record decision_latency_seconds per action & outcome (approved/denied/expired) | 11,19 | 4 | Histogram entries include outcome label | ✅ |
 |24 | Persona acknowledgment metrics | Counters & gauges for persona ack progress | 3 | 4 | persona_ack_total & persona_pending gauge present | ✅ |
 |25 | Live in-progress duration gauge | Track avg & max age for open requests per action | 11,19 | 4 | oldest_open_request_age_seconds & avg age metrics exposed | ✅ |
+|26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans | ✅ |
 |27 | Parameter override metrics | Counter param_overrides_total{action} & label outcome | 9 | 4 | Metric increments on successful override submission |  |
 |28 | Metrics reference documentation | Dedicated docs/metrics.md detailing each metric & labels | 11,19,23,24,25 | 4 | File published & linked from README | ✅ |
 |29 | Distributed replay/rate limit cache | Redis-backed replay + rate limit synchronization | 4,8 | 4 | Replay & rate limits function across multi-instance |  |
 |30 | Override governance policy | Enforce allowed override keys + optional diff size limit | 9 | 3 | Attempts exceeding limits rejected & audited | ✅ |
 |31 | Override schema validation | Per-action lightweight JSON schema for overrides | 9 | 3 | Invalid overrides rejected & audited | ✅ |
-|26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans | ✅ |
-|27 | Parameter override metrics | Counter param_overrides_total{action} & label outcome | 9 | 4 | Metric increments on successful override submission |  |
-|28 | Metrics reference documentation | Dedicated docs/metrics.md detailing each metric & labels | 11,19,23,24,25 | 4 | File published & linked from README |  |
-|29 | Distributed replay/rate limit cache | Redis-backed replay + rate limit synchronization | 4,8 | 4 | Replay & rate limits function across multi-instance |  |
-|30 | Override governance policy | Enforce allowed override keys + optional diff size limit | 9 | 3 | Attempts exceeding limits rejected & audited | ✅ |
 |32 | Override diff size limit | Reject based on combined changed value length | 30 | 3 | Rejections audited with reason diff_size_exceeded | ✅ |
 |33 | Custom schema error messages | Allow per-property errorMessage override | 31 | 3 | Custom message appears in rejection audit & Slack error | ✅ |
-|34 | Override rejection counters | Add counters per rejection reason (limit/schema/diff) | 30,31,32 | 4 | /metrics exposes override_rejections_total{action,reason} |  |
-|35 | Schema introspection endpoint | Expose GET /api/schemas/:action redacted view | 31 | 3 | Endpoint returns loaded schema subset |  |
-|36 | Override outcome labeling | Add outcome label to param_overrides_total (applied/rejected) | 27,30-32 | 4 | Metric exposes outcome label |  |
+|34 | Override rejection counters | Add counters per rejection reason (limit/schema/diff) | 30,31,32 | 4 | /metrics exposes override_rejections_total{action,reason} | ✅ |
+|35 | Schema introspection endpoint | Expose GET /api/schemas/:action redacted view | 31 | 3 | Endpoint returns loaded schema subset | ✅ |
+|36 | Override outcome labeling | Add outcome label to param_overrides_total (applied/rejected) | 27,30-32 | 4 | Metric exposes outcome label | ✅ |
 
 ## 4. Detailed Work Item Notes
 ### Item 1 – Enforce approver allowlists

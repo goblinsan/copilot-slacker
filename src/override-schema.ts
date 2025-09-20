@@ -36,7 +36,7 @@ interface ActionSchema {
 
 const cache = new Map<string, ActionSchema | null>();
 
-function loadSchema(action: string): ActionSchema | null {
+export function loadActionSchema(action: string): ActionSchema | null {
   if (cache.has(action)) return cache.get(action)!;
   const schemaPath = path.resolve(process.cwd(), '.agent', 'schemas', `${action}.json`);
   try {
@@ -53,7 +53,7 @@ function loadSchema(action: string): ActionSchema | null {
 }
 
 export function validateOverrides(action: string, overrides: Record<string, unknown>): { ok: true } | { ok: false; errors: string[] } {
-  const schema = loadSchema(action);
+  const schema = loadActionSchema(action);
   if (!schema || schema.type !== 'object' || !schema.properties) return { ok: true };
   const errors: string[] = [];
   for (const [k, v] of Object.entries(overrides)) {

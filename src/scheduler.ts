@@ -3,6 +3,7 @@ import { audit } from './log.js';
 import { updateRequestMessage, postEscalationNotice } from './slack.js';
 import { incCounter, observeDecisionLatency } from './metrics.js';
 import { broadcastForRequestId } from './sse.js';
+import { withSpan } from './tracing.js';
 
 /**
  * Periodic scheduler to expire requests and (future) trigger escalation warnings.
@@ -29,7 +30,11 @@ export function startScheduler(intervalOverride?: number) {
               if (r.escalate_min_approvals && r.escalate_min_approvals > r.min_approvals) {
                 r.min_approvals = r.escalate_min_approvals;
               }
-              audit('request_escalated',{ request_id: r.id });
+              await withSpan('scheduler.escalate', async span => {
+                span.setAttribute?.('request_id', r.id);
+                span.setAttribute?.('action', r.action);
+                audit('request_escalated',{ request_id: r.id });
+              });
               incCounter('escalations_total',{ action: r.action });
               await postEscalationNotice(r);
               broadcastForRequestId(r.id);
@@ -48,9 +53,13 @@ export function startScheduler(intervalOverride?: number) {
           }
         }
         if (r.status !== 'expired' && now >= exp && !['approved','denied','expired'].includes(r.status)) {
-          r.status = 'expired';
-          r.decided_at = new Date().toISOString();
-          audit('request_expired',{ request_id: r.id });
+          await withSpan('scheduler.expire', async span => {
+            r.status = 'expired';
+            r.decided_at = new Date().toISOString();
+            span.setAttribute?.('request_id', r.id);
+            span.setAttribute?.('action', r.action);
+            audit('request_expired',{ request_id: r.id });
+          });
           incCounter('expired_total',{ action: r.action });
           if (r.created_at) {
             const created = new Date(r.created_at).getTime();

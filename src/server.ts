@@ -13,7 +13,7 @@ import { incCounter, serializePrometheus } from './metrics.js';
 import { addListener, emitState, sendEvent, broadcastForRequestId } from './sse.js';
 import { markAndCheckReplay } from './replay.js';
 import { isAllowed as rateLimitAllowed } from './ratelimit.js';
-import { validateOverrides, totalOverrideCharSize } from './override-schema.js';
+import { validateOverrides, totalOverrideCharSize, loadActionSchema } from './override-schema.js';
 import { withSpan, initTracing } from './tracing.js';
 
 const POLICY_PATH = process.env.POLICY_PATH || '.agent/policies/guards.yml';
@@ -113,6 +113,20 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     res.writeHead(200,{ 'Content-Type':'text/plain; version=0.0.4' });
     res.end(base + extra);
     return;
+  }
+  // Schema introspection endpoint (returns sanitized override schema for action)
+  if (req.method === 'GET' && req.url?.startsWith('/api/schemas/')) {
+    const action = decodeURIComponent(req.url.split('/').pop()||'');
+    if (!action) return json(res,400,{ error:'missing_action' });
+    const schema = loadActionSchema(action);
+    if (!schema) return json(res,404,{ error:'not_found' });
+    // Sanitize: remove any errorMessage fields
+    const sanitized = { type: schema.type, properties: {} as Record<string, any> };
+    for (const [k,v] of Object.entries(schema.properties||{})) {
+      const { errorMessage, ...rest } = v as any;
+      sanitized.properties[k] = rest;
+    }
+    return json(res,200,sanitized);
   }
   // Re-request lineage endpoint
   if (req.method === 'POST' && req.url === '/api/guard/rerequest') {
@@ -346,6 +360,8 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       const maxKeys = process.env.OVERRIDE_MAX_KEYS ? Number(process.env.OVERRIDE_MAX_KEYS) : undefined;
       if (maxKeys !== undefined && Object.keys(overrides).length > maxKeys) {
         audit('override_rejected',{ request_id: record.id, actor: userId, changed_keys: Object.keys(overrides), reason: 'limit_exceeded', limit: maxKeys });
+        incCounter('override_rejections_total',{ action: record.action, reason: 'limit_exceeded' });
+        incCounter('param_overrides_total',{ action: record.action, outcome: 'rejected' });
         return json(res,200,{ response_action:'errors', errors:{ _ : `Too many changes (max ${maxKeys})` } });
       }
       const charLimit = process.env.OVERRIDE_MAX_CHARS ? Number(process.env.OVERRIDE_MAX_CHARS) : undefined;
@@ -353,6 +369,8 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         const size = totalOverrideCharSize(overrides);
         if (size > charLimit) {
           audit('override_rejected',{ request_id: record.id, actor: userId, changed_keys: Object.keys(overrides), reason: 'diff_size_exceeded', size, limit: charLimit });
+          incCounter('override_rejections_total',{ action: record.action, reason: 'diff_size_exceeded' });
+          incCounter('param_overrides_total',{ action: record.action, outcome: 'rejected' });
           return json(res,200,{ response_action:'errors', errors:{ _ : `Combined override size ${size} > limit ${charLimit}` } });
         }
       }
@@ -360,6 +378,8 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       const schemaResult = validateOverrides(record.action, overrides);
       if (!schemaResult.ok) {
         audit('override_rejected',{ request_id: record.id, actor: userId, changed_keys: Object.keys(overrides), reason: 'schema_validation', errors: schemaResult.errors });
+        incCounter('override_rejections_total',{ action: record.action, reason: 'schema_validation' });
+        incCounter('param_overrides_total',{ action: record.action, outcome: 'rejected' });
         return json(res,200,{ response_action:'errors', errors:{ _ : `Schema validation failed: ${schemaResult.errors.slice(0,3).join('; ')}` } });
       }
       // Apply overrides to redacted_params and recompute payload_hash
@@ -374,7 +394,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       const diff: Record<string,{ before: unknown; after: unknown }> = {};
       for (const k of Object.keys(overrides)) diff[k] = { before: before[k], after: overrides[k] };
       audit('override_applied',{ request_id: record.id, actor: userId, overrides: Object.keys(overrides), diff });
-      incCounter('param_overrides_total',{ action: record.action });
+  incCounter('param_overrides_total',{ action: record.action, outcome: 'applied' });
       broadcastForRequestId(record.id);
       try { await updateRequestMessage(record); } catch {}
       return json(res,200,{});

@@ -16,13 +16,13 @@ function build(overrides: Partial<Omit<GuardRequestRecord,'id'>> = {}): Omit<Gua
 }
 
 describe('applyApproval', () => {
-  it('rejects unauthorized actor', () => {
-    const r = Store.createRequest(build());
+  it('rejects unauthorized actor', async () => {
+    const r = await Store.createRequest(build());
     const res = applyApproval(r, 'UNAUTH');
     expect(res.ok).toBe(false);
   });
-  it('approves after quorum', () => {
-    const r = Store.createRequest(build());
+  it('approves after quorum', async () => {
+    const r = await Store.createRequest(build());
     const a1 = applyApproval(r, 'U1');
     expect(a1.ok).toBe(true);
     expect(r.status).toBe('ready_for_approval');
@@ -30,14 +30,14 @@ describe('applyApproval', () => {
     expect(a2.ok).toBe(true);
     expect(r.status).toBe('approved');
   });
-  it('prevents duplicate approval', () => {
-    const r = Store.createRequest(build());
+  it('prevents duplicate approval', async () => {
+    const r = await Store.createRequest(build());
     applyApproval(r, 'U1');
     const dup = applyApproval(r, 'U1');
     expect(dup.ok).toBe(false);
   });
-  it('tracks distinct approvers count accurately', () => {
-    const r = Store.createRequest(build());
+  it('tracks distinct approvers count accurately', async () => {
+    const r = await Store.createRequest(build());
     expect(r.approvals_count).toBe(0);
     applyApproval(r, 'U1');
     expect(r.approvals_count).toBe(1);

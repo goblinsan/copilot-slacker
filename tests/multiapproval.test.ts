@@ -34,7 +34,7 @@ beforeAll(async () => {
 
 describe('Distinct multi-approval tracking (item #2)', () => {
   it('exposes approver IDs in wait response after quorum', async () => {
-    const rec = Store.createRequest(build(2, ['U1','U2','U3']));
+    const rec = await Store.createRequest(build(2, ['U1','U2','U3']));
     const a1 = applyApproval(rec, 'U1');
     expect(a1.ok).toBe(true);
     expect(rec.status).toBe('ready_for_approval');
@@ -51,8 +51,8 @@ describe('Distinct multi-approval tracking (item #2)', () => {
     expect(json.approvers.length).toBe(2);
   });
 
-  it('rejects additional approvals after terminal state', () => {
-    const rec = Store.createRequest(build(1, ['U1','U2']));
+  it('rejects additional approvals after terminal state', async () => {
+    const rec = await Store.createRequest(build(1, ['U1','U2']));
     const first = applyApproval(rec, 'U1');
     expect(first.ok).toBe(true);
     expect(rec.status).toBe('approved');
