@@ -45,7 +45,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans | ✅ |
 |27 | Parameter override metrics | Counter param_overrides_total{action,outcome} (applied/rejected) | 9 | 4 | Metric increments on successful override submission / rejection labeled | ✅ |
 |37 | Trace span assertion tests | Add tests ensuring critical spans emitted (create, approve, expire, escalate, slack.post/update) | 26 | 4 | Tests fail if span names missing |  |
-|38 | OTLP trace exporter option | Env toggle to export spans to OTLP endpoint | 11,26 | 4 | Spans visible in external collector when configured |  |
+|38 | OTLP trace exporter option | Env toggle to export spans to OTLP endpoint (OTLP_ENDPOINT, OTLP_HEADERS, OTLP_TIMEOUT_MS) | 11,26 | 4 | Spans visible in external collector when configured | ✅ |
 |39 | Slack rate limit queue v2 | Coalesce rapid consecutive message updates & jitter backoff | 22 | 4 | Reduced duplicate updates under churn |  |
 |40 | Policy hot-reload | Reload policies from disk/Redis on SIGHUP or admin endpoint | 10 | 4 | Policy changes applied without restart |  |
 |41 | Retention & archival policy | TTL + archival export for audit + requests | 10 | 4 | Documented retention config & automated purge |  |

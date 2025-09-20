@@ -34,6 +34,28 @@ export function initTracing() {
   } else if (exporterType === 'none') {
     // no exporter
   }
+  // OTLP exporter augmentation (http) if OTLP_ENDPOINT provided
+  const otlpEndpoint = process.env.OTLP_ENDPOINT;
+  if (otlpEndpoint) {
+    try {
+      const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
+      const headersEnv = process.env.OTLP_HEADERS || '';
+      const headers: Record<string,string> = {};
+      headersEnv.split(',').map(s=>s.trim()).filter(Boolean).forEach(pair => {
+        const [k,v] = pair.split('='); if (k && v !== undefined) headers[k.trim()] = v.trim();
+      });
+      const timeoutMs = process.env.OTLP_TIMEOUT_MS ? Number(process.env.OTLP_TIMEOUT_MS) : undefined;
+      const exporter = new OTLPTraceExporter({
+        url: otlpEndpoint,
+        headers: Object.keys(headers).length ? headers : undefined,
+        timeoutMillis: timeoutMs
+      });
+      tracerProvider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Failed to initialize OTLP exporter', e);
+    }
+  }
   tracerProvider.register();
 }
 

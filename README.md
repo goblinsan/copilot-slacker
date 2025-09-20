@@ -95,7 +95,7 @@ expired_total{action="<action>"}
 escalations_total{action="<action>"}
  security_events_total{type="<bad_signature|stale_signature|replay|rate_limited>"}  # label: type (no action label)
  persona_ack_total{action="<action>",persona="<persona>"}
- param_overrides_total{action="<action>"}
+ param_overrides_total{action="<action>",outcome="applied|rejected"}
 ```
 
 Histogram (labels: action, outcome where outcome ∈ approved|denied|expired):
@@ -224,6 +224,9 @@ Planned enhancements (see project plan items 27–30):
   - `OVERRIDE_MAX_CHARS` (optional integer; reject override submissions whose combined changed value length exceeds this)
   - `TRACING_ENABLED` (`true|false`) enable OpenTelemetry tracing (default disabled)
   - `TRACING_EXPORTER` (`console|memory|none`) exporter selection; `memory` for tests only
+  - `OTLP_ENDPOINT` (optional) URL for OTLP HTTP trace exporter (e.g. https://otel-collector:4318/v1/traces)
+  - `OTLP_HEADERS` (optional) comma-separated key=value pairs added as HTTP headers (e.g. `Authorization=Bearer abc123,X-Env=staging`)
+  - `OTLP_TIMEOUT_MS` (optional) request timeout for OTLP exporter
   - (Schema) Place per-action JSON schema in `.agent/schemas/<action>.json` to enable validation
   - `TLS_CERT_FILE` / `TLS_KEY_FILE` (optional TLS)
   - `TLS_CA_FILE` (optional, for mTLS)
