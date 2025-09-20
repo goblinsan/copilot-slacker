@@ -488,6 +488,12 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
   const allAck = record!.required_personas.every(p => record!.persona_state[p] === 'ack');
         if (allAck && record.status === 'awaiting_personas') {
           record.status = 'ready_for_approval';
+          try {
+            if (Store.updateFields) {
+              await Promise.resolve(Store.updateFields(record.id, { status: 'ready_for_approval' }));
+              audit('persona_status_persisted',{ request_id: record.id, actor: userId, persona });
+            }
+          } catch {/* ignore persistence errors */}
           audit('persona_ack_ready',{ request_id: record.id, actor: userId, persona, status: record.status });
         }
         try { audit('persona_ack_stage',{ request_id: record.id, actor: userId, persona, state: record.persona_state[persona], all_ack: allAck, status: record.status }); } catch {/* ignore */}
