@@ -28,13 +28,19 @@ const approvalSeq = new Map<string, number>();
 function nextSeq(id: string) { const n = (approvalSeq.get(id) || 0) + 1; approvalSeq.set(id, n); return n; }
 
 export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalResult {
+  // Capture the original request id early so that even if we adopt a canonical object later, stage sequencing
+  // remains anchored to the stable id (avoids seq reset / undefined id when an async getById Promise was mistakenly adopted).
+  const requestId = req.id;
   const stageDiag = process.env.APPROVAL_STAGE_DIAG === '1';
   function stage(stage: string) {
-    if (!stageDiag) return; try { audit('approval_stage',{ request_id: req.id, actor, stage, seq: nextSeq(req.id), status: req.status, count: req.approvals_count }); } catch {/* ignore */}
+    if (!stageDiag) return;
+    try {
+      audit('approval_stage', { request_id: requestId, actor, stage, seq: nextSeq(requestId), status: req.status, count: req.approvals_count });
+    } catch { /* ignore */ }
   }
   // Always-on minimal core stage events (not gated by env) to guarantee CI visibility.
   function core(stage: string) {
-    try { audit('approval_stage_core', { request_id: req.id, actor, stage, seq: nextSeq(req.id), status: req.status, count: req.approvals_count }); } catch { /* ignore */ }
+    try { audit('approval_stage_core', { request_id: requestId, actor, stage, seq: nextSeq(requestId), status: req.status, count: req.approvals_count }); } catch { /* ignore */ }
   }
   core('enter_core');
   stage('enter');
@@ -43,24 +49,25 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
   // Always attempt to resolve the canonical request object from the Store first. Divergence in CI indicates
   // some callers may be holding a stale/cloned reference (e.g., JSON round‑trip, test harness cloning).
   try {
-    const maybe = (Store as any).getById ? (Store as any).getById(req.id) : undefined;
+    let maybe = (Store as any).getById ? (Store as any).getById(req.id) : undefined;
+    // If getById is async (returns a Promise), we cannot adopt synchronously; ignore and proceed with original ref.
+    if (maybe && typeof (maybe as any).then === 'function') {
+      audit('approval_canonical_async_pending', { request_id: requestId, actor });
+      maybe = undefined;
+    }
     if (maybe && maybe !== req) {
       const canonical = maybe as GuardRequestRecord;
       const canonId = (canonical as any).__identity || ((canonical as any).__identity = crypto.randomUUID());
-      audit('approval_canonical_adopted', { request_id: req.id, actor, identity_orig: identity, identity_canonical: canonId, status_orig: req.status, status_canonical: canonical.status });
+      audit('approval_canonical_adopted', { request_id: requestId, actor, identity_orig: identity, identity_canonical: canonId, status_orig: req.status, status_canonical: canonical.status });
       stage('canonical_adopted');
-      // Synchronize any caller-side field mutations (like overrides already applied to req.redacted_params) into canonical
-      // if they differ and canonical is considered source of truth thereafter.
-      if (req !== canonical) {
-        // Merge only known mutable fields we rely on pre-approval (redacted_params, payload_hash)
-        if ((req as any).redacted_params && canonical.redacted_params !== (req as any).redacted_params) {
-          (canonical as any).redacted_params = (req as any).redacted_params;
-          (canonical as any).payload_hash = (req as any).payload_hash;
-        }
+      // Synchronize mutable fields we rely on pre-approval (redacted_params, payload_hash)
+      if ((req as any).redacted_params && canonical.redacted_params !== (req as any).redacted_params) {
+        (canonical as any).redacted_params = (req as any).redacted_params;
+        (canonical as any).payload_hash = (req as any).payload_hash;
       }
-      req = canonical; // adopt canonical for rest of function
+      req = canonical; // adopt canonical for rest of function (safe: not a Promise)
     } else if (!maybe) {
-      audit('approval_store_miss', { request_id: req.id, actor, identity, phase: 'pre_add' });
+      audit('approval_store_miss', { request_id: requestId, actor, identity, phase: 'pre_add' });
       stage('store_miss_pre');
     }
   } catch { /* ignore canonical resolution errors */ }
