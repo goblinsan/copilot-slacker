@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { WebClient } from '@slack/web-api';
+import { withSpan } from './tracing.js';
 import type { GuardRequestRecord } from './types.js';
 
 const slackToken = process.env.SLACK_BOT_TOKEN || '';
@@ -17,6 +18,9 @@ export function verifySlackSignature(signingSecret: string, body: string, timest
 }
 
 export async function postRequestMessage(req: GuardRequestRecord, channel: string) {
+  return withSpan('slack.post_message', async span => {
+    span.setAttribute?.('request_id', req.id);
+    span.setAttribute?.('action', req.action);
   const header = `Guard Request: ${req.action}`;
   const personaBlocks = buildPersonaBlocks(req);
   const r = await slackClient.chat.postMessage({
@@ -30,25 +34,30 @@ export async function postRequestMessage(req: GuardRequestRecord, channel: strin
       ...actionButtons(req)
     ]
   });
-  return { channel: r.channel!, ts: r.ts! };
+    return { channel: r.channel!, ts: r.ts! };
+  });
 }
 
 export async function updateRequestMessage(req: GuardRequestRecord) {
   if(!req.slack_channel || !req.slack_message_ts) return;
-  const header = `Guard Request: ${req.action}`;
-  const personaBlocks = buildPersonaBlocks(req);
-  const remaining = timeRemainingLine(req);
-  await slackClient.chat.update({
-    channel: req.slack_channel,
-    ts: req.slack_message_ts,
-    text: header,
-    blocks: [
-      { type: 'header', text: { type: 'plain_text', text: header } },
-      { type: 'context', elements: [ { type: 'mrkdwn', text: `Repo: *${req.meta.origin.repo}* Branch: *${req.meta.origin.branch || ''}*` }, { type: 'mrkdwn', text: `Requester: ${req.meta.requester.display || req.meta.requester.id}` }, ...(remaining? [{ type:'mrkdwn', text: remaining }]:[]) ] },
-      { type: 'section', fields: [ { type: 'mrkdwn', text: `*Action*\n${req.action}`}, { type: 'mrkdwn', text: `*Justification*\n${req.meta.justification}` } ] },
-      ...personaBlocks.body,
-      ...actionButtons(req)
-    ]
+  await withSpan('slack.update_message', async span => {
+    span.setAttribute?.('request_id', req.id);
+    span.setAttribute?.('action', req.action);
+    const header = `Guard Request: ${req.action}`;
+    const personaBlocks = buildPersonaBlocks(req);
+    const remaining = timeRemainingLine(req);
+    await slackClient.chat.update({
+      channel: req.slack_channel!,
+      ts: req.slack_message_ts!,
+      text: header,
+      blocks: [
+        { type: 'header', text: { type: 'plain_text', text: header } },
+        { type: 'context', elements: [ { type: 'mrkdwn', text: `Repo: *${req.meta.origin.repo}* Branch: *${req.meta.origin.branch || ''}*` }, { type: 'mrkdwn', text: `Requester: ${req.meta.requester.display || req.meta.requester.id}` }, ...(remaining? [{ type:'mrkdwn', text: remaining }]:[]) ] },
+        { type: 'section', fields: [ { type: 'mrkdwn', text: `*Action*\n${req.action}`}, { type: 'mrkdwn', text: `*Justification*\n${req.meta.justification}` } ] },
+        ...personaBlocks.body,
+        ...actionButtons(req)
+      ]
+    });
   });
 }
 
@@ -56,12 +65,16 @@ export async function postEscalationNotice(req: GuardRequestRecord) {
   // Post a threaded escalation warning referencing imminent expiration.
   if(!req.slack_channel || !req.slack_message_ts) return;
   try {
-    const remainingMs = new Date(req.expires_at).getTime() - Date.now();
-    const minutes = Math.max(0, Math.round(remainingMs/60000));
-    await slackClient.chat.postMessage({
-      channel: req.slack_channel,
-      thread_ts: req.slack_message_ts,
-      text: `:warning: Escalation: Request *${req.action}* will expire in ~${minutes}m. Approvals needed: ${req.approvals_count}/${req.min_approvals}.`
+    await withSpan('slack.post_escalation', async span => {
+      span.setAttribute?.('request_id', req.id);
+      span.setAttribute?.('action', req.action);
+      const remainingMs = new Date(req.expires_at).getTime() - Date.now();
+      const minutes = Math.max(0, Math.round(remainingMs/60000));
+      await slackClient.chat.postMessage({
+        channel: req.slack_channel!,
+        thread_ts: req.slack_message_ts!,
+        text: `:warning: Escalation: Request *${req.action}* will expire in ~${minutes}m. Approvals needed: ${req.approvals_count}/${req.min_approvals}.`
+      });
     });
   } catch {/* swallow */}
 }

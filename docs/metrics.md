@@ -12,7 +12,8 @@ This document lists all Prometheus metrics exposed at `/metrics` and their seman
 | `expired_total` | action | Requests that expired | Scheduler transitions to expired |
 | `escalations_total` | action | Escalation notices fired | Scheduler fires escalation notice |
 | `persona_ack_total` | action, persona | Persona acknowledgments | When an approver acks persona requirement |
-| `param_overrides_total` | action | Successful override + approve submissions | After override_applied audit emitted |
+| `param_overrides_total` | action, outcome | Override submissions categorized by outcome (applied/rejected) | Applied after override_applied; rejected increments on validation failure |
+| `override_rejections_total` | action, reason | Override rejections by reason (limit_exceeded, diff_size_exceeded, schema_validation) | Each override_rejected audit increments |
 | `security_events_total` | type | Security rejections | Bad signature, stale_signature, replay, rate_limited |
 
 ## Histogram
@@ -41,7 +42,7 @@ While not separate metrics, audit events provide observability beyond counters:
 | `override_rejected` | `schema_validation` | Schema validation failed |
 | `override_applied` | — | Overrides applied & request approved |
 
-Future enhancements may expose dedicated counters for each rejection reason; current strategy prefers audit log aggregation to limit cardinality.
+Rejection reasons are now also surfaced via `override_rejections_total{action,reason}` enabling alerting without parsing audit logs.
 
 ## Scrape Example
 

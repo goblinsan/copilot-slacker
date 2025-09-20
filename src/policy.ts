@@ -20,7 +20,7 @@ export function evaluate(action: string, policyFile: PolicyFile): PolicyEvaluati
       // Construct a minimal manual policy requiring superApprovers if present
       const superApprovers = policyFile.defaults?.superApprovers || [];
       if (!superApprovers.length) return undefined;
-      const synthetic: PolicyAction = { approvers: { allowSlackIds: superApprovers, minApprovals: 1 } } as PolicyAction;
+      const synthetic: PolicyAction = { approvers: { allowSlackIds: superApprovers, minApprovals: 1 }, allowParamOverrides: true, overrideKeys: ['reason','count'] } as PolicyAction;
       return materialize(action, synthetic, policyFile);
     }
     return undefined;

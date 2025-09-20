@@ -146,6 +146,8 @@ Prometheus naming convention: snake_case, base unit seconds where temporal.
 | escalations_total | counter | action | Escalation notifications sent |
 | decision_latency_seconds | histogram | action | Time from request create → terminal state |
 | pending_requests | gauge | action | Current non-terminal requests |
+| param_overrides_total | counter | action, outcome | Override submissions by outcome (applied/rejected) |
+| override_rejections_total | counter | action, reason | Override rejection reasons (limit_exceeded, diff_size_exceeded, schema_validation) |
 
 ## 8. Environments
 | Env | Purpose | Differences |

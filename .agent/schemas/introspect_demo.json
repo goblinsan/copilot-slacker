@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "reason": { "type": "string", "minLength": 5, "errorMessage": "must be >=5 chars" },
+    "count": { "type": "number", "min": 1 }
+  }
+}
