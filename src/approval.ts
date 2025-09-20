@@ -27,6 +27,7 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     audit('approval_rejected_duplicate', { request_id: req.id, actor });
     return { ok: false, error: 'duplicate' };
   }
+  const prevCount = req.approvals_count;
   Store.addApproval({
     id: crypto.randomUUID(),
     request_id: req.id,
@@ -35,7 +36,21 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     decision: 'approved',
     created_at: new Date().toISOString()
   });
-  // At this point in-memory store updates req.approvals_count via addApproval.
+  // Fallback: if backend did not mutate req.approvals_count (e.g., different object instance), recompute.
+  if (req.approvals_count === prevCount) {
+    try {
+      const approvers = (Store.approvalsFor as any)(req.id);
+      if (Array.isArray(approvers)) {
+        const recomputed = approvers.length;
+        if (recomputed !== req.approvals_count) {
+          audit('approval_count_fallback', { request_id: req.id, actor, observed: req.approvals_count, recomputed });
+          (req as any).approvals_count = recomputed; // direct mutation safe for in-memory test path
+        }
+      }
+    } catch {
+      // ignore fallback errors
+    }
+  }
   audit('approval_added', { request_id: req.id, actor, count: req.approvals_count });
   if (req.approvals_count >= req.min_approvals) {
     req.status = 'approved';
