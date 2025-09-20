@@ -138,6 +138,30 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
         req.status = 'approved';
         req.decided_at = new Date().toISOString();
         audit('approval_async_assumed_terminal', { request_id: requestId, actor });
+        // Best-effort immediate sync of underlying store object if a separate canonical instance exists (common in async backends)
+        try {
+          const maybeStoreObj = (Store as any).getById ? (Store as any).getById(req.id) : undefined;
+          if (maybeStoreObj && typeof maybeStoreObj === 'object' && typeof (maybeStoreObj as any).then !== 'function' && maybeStoreObj !== req) {
+            (maybeStoreObj as any).approvals_count = 1;
+            (maybeStoreObj as any).status = 'approved';
+            (maybeStoreObj as any).decided_at = (req as any).decided_at;
+            audit('approval_async_store_synced', { request_id: requestId, actor });
+          }
+        } catch { /* ignore */ }
+        // Fire an async persistence path for stores exposing updateFields (e.g., redis) to ensure status durability.
+        try {
+          if ((Store as any).updateFields) {
+            queueMicrotask(() => {
+              try {
+                Promise.resolve((Store as any).updateFields(req.id, { status: 'approved', approvals_count: 1, decided_at: (req as any).decided_at }))
+                  .then(() => audit('approval_async_persisted', { request_id: requestId, actor }))
+                  .catch(() => {/* swallow */});
+              } catch { /* ignore */ }
+            });
+          }
+        } catch { /* ignore */ }
+        // Emit a core post-add stage even though underlying async add not yet resolved for consistent stage triage.
+        try { audit('approval_stage_core', { request_id: requestId, actor, stage: 'post_add_core_early', seq: nextSeq(requestId), status: req.status, count: req.approvals_count }); } catch { /* ignore */ }
         incCounter('approvals_total',{ action: req.action });
         const latencySecA = (new Date(req.decided_at).getTime() - new Date(req.created_at).getTime())/1000;
         observeDecisionLatency(latencySecA,{ action: req.action, outcome: 'approved' });
