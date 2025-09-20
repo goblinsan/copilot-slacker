@@ -26,6 +26,7 @@ interface PropertySchema {
   maxLength?: number;
   min?: number;
   max?: number;
+  errorMessage?: string; // custom one-line override for any failure
   // ignore other fields
 }
 interface ActionSchema {
@@ -85,6 +86,16 @@ export function validateOverrides(action: string, overrides: Record<string, unkn
       if (ps.min !== undefined && v < ps.min) errors.push(`${k}: below min ${ps.min}`);
       if (ps.max !== undefined && v > ps.max) errors.push(`${k}: above max ${ps.max}`);
     }
+    // If custom errorMessage defined and any error recorded for this key, replace all those entries with single custom one
+    if (ps.errorMessage) {
+      const prefix = `${k}:`;
+      const had = errors.some(e => e.startsWith(prefix));
+      if (had) {
+        // Remove existing errors for k
+        for (let i = errors.length -1; i>=0; i--) if (errors[i].startsWith(prefix)) errors.splice(i,1);
+        errors.push(`${k}: ${ps.errorMessage}`);
+      }
+    }
   }
   if (errors.length) return { ok: false, errors };
   return { ok: true };
@@ -92,3 +103,7 @@ export function validateOverrides(action: string, overrides: Record<string, unkn
 
 // For tests
 export function _clearSchemaCache() { cache.clear(); }
+
+export function totalOverrideCharSize(overrides: Record<string, unknown>): number {
+  return Object.values(overrides).reduce<number>((acc, v) => acc + String(v).length, 0);
+}

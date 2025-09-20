@@ -7,6 +7,7 @@ Slack-based approval gate for LLM / agent risky operations (dependency install, 
 * Slack interactive Approve / Deny buttons.
 * Optional parameter override modal (policy-gated safe edits prior to approval).
 * Override governance (limit changed keys, audited diffs & rejections).
+* Override diff size limit (`OVERRIDE_MAX_CHARS`) and custom schema error messages.
 * Persona co-sign (scaffolding present; enrichment TBD).
 * Audit logging (stdout JSON lines).
 * Pluggable store (in-memory; replace with Redis adapter).
@@ -182,7 +183,8 @@ the Slack message (once persona gating is satisfied) includes an `Approve w/ Edi
 5. Governance: if `OVERRIDE_MAX_KEYS` is set, submissions changing more than this number of keys are rejected with an `override_rejected` audit event (reason `limit_exceeded`).
 6. Audit event `override_applied` records changed key names and full redacted before/after diff for each changed key.
 7. Metric `param_overrides_total{action}` increments on success.
-8. Optional schema validation: if a file `.agent/schemas/<action>.json` exists it is loaded and each changed key is validated against a minimal schema subset (type, enum, pattern, minLength, maxLength, min, max). Failures reject the submission with `override_rejected` (reason `schema_validation`).
+8. Optional schema validation: if a file `.agent/schemas/<action>.json` exists it is loaded and each changed key is validated against a minimal schema subset (type, enum, pattern, minLength, maxLength, min, max). Failures reject the submission with `override_rejected` (reason `schema_validation`). You can supply `errorMessage` per property to replace detailed messages with a single custom one.
+9. Diff size governance: if `OVERRIDE_MAX_CHARS` is set, the total length (stringified) of changed values must not exceed it or the submission is rejected (reason `diff_size_exceeded`).
 
 Schema example (`.agent/schemas/deploy_config.json`):
 ```json
@@ -198,9 +200,9 @@ Schema example (`.agent/schemas/deploy_config.json`):
 Only changed keys are validated (partial update semantics). Unsupported / extra JSON Schema keywords are ignored.
 
 Planned enhancements (see project plan items 27–30):
-* Schema validation per action (reject malformed values).
-* Governance limits (max keys changed, diff size enforcement).
-* Audit enrichment with before/after diffs (with redaction honored).
+* (Done) Schema validation per action (reject malformed values).
+* (Done) Governance limits (max keys changed, diff size enforcement).
+* (Done) Audit enrichment with before/after diffs (with redaction honored).
 * Outcome labeling for override metric if distinct outcomes added.
 
 ## Security Notes
@@ -219,6 +221,7 @@ Planned enhancements (see project plan items 27–30):
   - `POLICY_PATH`
   - `PORT`
   - `OVERRIDE_MAX_KEYS` (optional integer; reject override submissions modifying more than this many keys)
+  - `OVERRIDE_MAX_CHARS` (optional integer; reject override submissions whose combined changed value length exceeds this)
   - (Schema) Place per-action JSON schema in `.agent/schemas/<action>.json` to enable validation
   - `TLS_CERT_FILE` / `TLS_KEY_FILE` (optional TLS)
   - `TLS_CA_FILE` (optional, for mTLS)

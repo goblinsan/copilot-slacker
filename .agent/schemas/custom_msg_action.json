@@ -1,0 +1,6 @@
+{
+  "type": "object",
+  "properties": {
+    "reason": { "type": "string", "minLength": 5, "errorMessage": "must be a descriptive reason (>=5 chars)" }
+  }
+}

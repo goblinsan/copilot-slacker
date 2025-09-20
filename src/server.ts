@@ -13,7 +13,7 @@ import { incCounter, serializePrometheus } from './metrics.js';
 import { addListener, emitState, sendEvent, broadcastForRequestId } from './sse.js';
 import { markAndCheckReplay } from './replay.js';
 import { isAllowed as rateLimitAllowed } from './ratelimit.js';
-import { validateOverrides } from './override-schema.js';
+import { validateOverrides, totalOverrideCharSize } from './override-schema.js';
 
 const POLICY_PATH = process.env.POLICY_PATH || '.agent/policies/guards.yml';
 const policyFile = loadPolicy(POLICY_PATH);
@@ -332,6 +332,14 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       if (maxKeys !== undefined && Object.keys(overrides).length > maxKeys) {
         audit('override_rejected',{ request_id: record.id, actor: userId, changed_keys: Object.keys(overrides), reason: 'limit_exceeded', limit: maxKeys });
         return json(res,200,{ response_action:'errors', errors:{ _ : `Too many changes (max ${maxKeys})` } });
+      }
+      const charLimit = process.env.OVERRIDE_MAX_CHARS ? Number(process.env.OVERRIDE_MAX_CHARS) : undefined;
+      if (charLimit !== undefined) {
+        const size = totalOverrideCharSize(overrides);
+        if (size > charLimit) {
+          audit('override_rejected',{ request_id: record.id, actor: userId, changed_keys: Object.keys(overrides), reason: 'diff_size_exceeded', size, limit: charLimit });
+          return json(res,200,{ response_action:'errors', errors:{ _ : `Combined override size ${size} > limit ${charLimit}` } });
+        }
       }
       // Schema validation (if schema for action exists)
       const schemaResult = validateOverrides(record.action, overrides);
