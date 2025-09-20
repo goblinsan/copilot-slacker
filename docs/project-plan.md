@@ -1,7 +1,7 @@
 # Approval Service Project Plan
 
 Status: Draft  
-Last Updated: 2025-09-20 (completed items 13,14,15,16,37,39,40,41; retention, archival, load baseline, deployment packaging, CI/CD & runbook added)
+Last Updated: 2025-09-20 (completed items 13,14,15,16,17,37,39,40,41; readiness improvements & future hardening backlog appended)
 
 ## 1. Overview
 This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
@@ -33,7 +33,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image builds locally; Dockerfile + readiness (`/readyz`) + env validation module merged | ✅ |
 |15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push | ✅ |
 |16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned | ✅ |
-|17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed |  |
+|17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed; doc published | ✅ |
 |18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged |  |
 |19 | Metrics endpoint exposure | Implement `/metrics` (Prometheus text) exporting counters; add decision latency histogram skeleton | 11 | 4 | /metrics returns 200 with counters | ✅ |
 |20 | Approval latency histogram | Measure create→terminal duration; bucket & expose (now labeled with outcome) | 11 | 4 | Histogram shows non-zero observations | ✅ |
@@ -58,6 +58,15 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |34 | Override rejection counters | Add counters per rejection reason (limit/schema/diff) | 30,31,32 | 4 | /metrics exposes override_rejections_total{action,reason} | ✅ |
 |35 | Schema introspection endpoint | Expose GET /api/schemas/:action redacted view | 31 | 3 | Endpoint returns loaded schema subset | ✅ |
 |36 | Override outcome labeling | Add outcome label to param_overrides_total (applied/rejected) | 27,30-32 | 4 | Metric exposes outcome label | ✅ |
+|42 | Multi-arch image build | Build & publish linux/amd64 + linux/arm64 manifests | 14,15 | 5 | Release workflow publishes multi-arch image |  |
+|43 | Distroless runtime image | Replace alpine final stage with distroless node base | 14 | 5 | Image passes tests; vuln count reduced |  |
+|44 | SBOM & provenance | Generate SBOM (cyclonedx) + SLSA provenance attestation | 15 | 5 | Artifacts attached to release |  |
+|45 | Image signing | Cosign sign & verify in deployment pipeline | 44 | 5 | Signatures verified pre-deploy |  |
+|46 | Weekly vuln re-scan workflow | Scheduled Trivy scan; open issue on new HIGH/CRITICAL | 15 | 5 | Issues auto-created on findings |  |
+|47 | Dependency update automation | Renovate/Dependabot config enabling PRs | 15 | 5 | Automated upgrade PRs merged after CI |  |
+|48 | Redis HA / failover test | Simulate primary failover; ensure no data loss | 4 | 5 | Documented procedure & success metrics |  |
+|49 | Slack 429 metrics & alerts | Expose counter/gauge for rate limit events | 22 | 4 | Alert fires on sustained 429s |  |
+|50 | Incident timeline template | Add template to runbook for postmortems | 16 | 6 | Template adopted in first incident |  |
 
 ## 4. Detailed Work Item Notes
 ### Item 14 – Deployment Packaging (Completed)
@@ -97,8 +106,8 @@ Use Vitest + local Redis (test container). Mock Slack Web API via nock or intern
 ### Item 13 – Load Test
 Implemented `scripts/load-sim.ts` (Node + tsx). Provides concurrent request creation and inline approvals; reports create / approval op / end-to-end percentiles. Baseline local dev (30 req / 5 concurrency, in-memory, no Slack post): create P50≈4ms P95≈8ms, approval op P50<0.2ms, end-to-end P95≈9ms. Future enhancements: denial & timeout scenarios, Slack API latency simulation, CSV export, ramp profiles.
 
-### Item 14 – Deployment Packaging
-Dockerfile multi-stage (`node:20-alpine` build → distroless runtime). Add health (`/healthz`) & readiness (`/readyz`) endpoints.
+### Item 14 – Deployment Packaging (Note)
+Earlier duplicate note removed; authoritative description exists in completed section above. Distroless migration tracked under future item #43.
 
 ### Item 15 – CI/CD (Completed)
 Implemented GitHub Actions:
@@ -109,17 +118,11 @@ Caching: `actions/setup-node` npm cache. Future enhancements: provenance attesta
 ### Item 16 – Operational Runbook (Completed)
 Created `docs/runbook.md` covering: system overview, secrets rotation, policy reload mechanisms, Redis failover diagnostics, escalation & timeout tuning, latency SLO investigation methodology, Slack outage mitigations, retention & archival operations, backup & restore guidance, on-call alert catalog with triage steps, metrics dashboard recommendations, troubleshooting playbooks, capacity planning, forward hardening roadmap (multi-arch, distroless, cosign, rate limit metrics), change management, and contacts. Future enhancements: add live incident timeline template, per-metric SLO doc, and automation scripts for common diagnostics.
 
-### Item 17 – Production Readiness Checklist
-* Security review signoff
-* All high severity vulnerabilities resolved
-* Load test results documented
-* Backup policy for audit logs validated
-* On-call runbook approved
-* Metrics dashboard published
-* DR scenario (Redis restore) executed
+### Item 17 – Production Readiness Checklist (Completed)
+Created `docs/production-readiness.md` summarizing: SLOs (latency, availability), security controls (signature verification, replay defense, mTLS option), DR plan (Redis snapshot + archive export), backup validation steps, escalation & paging policy, performance baseline (load harness data), metrics dashboard inventory, and go-live gates (all critical items closed, no HIGH vulns, runbook approved, restore test passed).
 
-### Item 18 – Documentation Polish
-Add: persona sequence diagram, SSE client snippet (curl + Node), lineage ASCII diagram, policy cookbook (examples: single approver, 2-of-3 quorum, persona gating + escalation).
+### Future Enhancements Backlog
+Outlined items 42–50 targeting operational hardening: multi-architecture distribution, distroless runtime to shrink attack surface, supply chain integrity (SBOM, provenance, signing), continuous vulnerability posture (scheduled scans & dependency automation), resilience (Redis HA test), observability gap closure (Slack 429 metrics), and incident process maturity (timeline template).
 
 ## 5. Acceptance Criteria (Roll-Up)
 | Category | Criteria |

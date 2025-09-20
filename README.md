@@ -350,6 +350,8 @@ Future Enhancements:
 
 (See detailed operational procedures in [Operational Runbook](docs/runbook.md))
 
+Production readiness criteria & go-live gates are tracked in the [Production Readiness Checklist](docs/production-readiness.md). Review it before promoting a new major release to ensure all gates (SLOs, DR test, vulnerability posture, alerts) are satisfied.
+
 ### Docker
 Build the image (multi-stage, Node 20 Alpine):
 ```bash
