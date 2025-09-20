@@ -24,8 +24,30 @@ try {
 export type ApprovalResult = { ok: true; terminal?: boolean } | { ok: false; error: string };
 
 export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalResult {
-  // Capture a stable object identity token for the incoming request reference.
+  // Capture / assign identity on the incoming (possibly non-canonical) reference.
   const identity = (req as any).__identity || ((req as any).__identity = crypto.randomUUID());
+  // Always attempt to resolve the canonical request object from the Store first. Divergence in CI indicates
+  // some callers may be holding a stale/cloned reference (e.g., JSON round‑trip, test harness cloning).
+  try {
+    const maybe = (Store as any).getById ? (Store as any).getById(req.id) : undefined;
+    if (maybe && maybe !== req) {
+      const canonical = maybe as GuardRequestRecord;
+      const canonId = (canonical as any).__identity || ((canonical as any).__identity = crypto.randomUUID());
+      audit('approval_canonical_adopted', { request_id: req.id, actor, identity_orig: identity, identity_canonical: canonId, status_orig: req.status, status_canonical: canonical.status });
+      // Synchronize any caller-side field mutations (like overrides already applied to req.redacted_params) into canonical
+      // if they differ and canonical is considered source of truth thereafter.
+      if (req !== canonical) {
+        // Merge only known mutable fields we rely on pre-approval (redacted_params, payload_hash)
+        if ((req as any).redacted_params && canonical.redacted_params !== (req as any).redacted_params) {
+          (canonical as any).redacted_params = (req as any).redacted_params;
+          (canonical as any).payload_hash = (req as any).payload_hash;
+        }
+      }
+      req = canonical; // adopt canonical for rest of function
+    } else if (!maybe) {
+      audit('approval_store_miss', { request_id: req.id, actor, identity, phase: 'pre_add' });
+    }
+  } catch { /* ignore canonical resolution errors */ }
   // Debug pre-state snapshot (guarded by env flag to reduce noise in normal runs)
   const debug = process.env.APPROVAL_DEBUG === '1';
   if (debug) {
@@ -63,6 +85,21 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     decision: 'approved',
     created_at: new Date().toISOString()
   });
+  // Post-mutation canonical fetch (in case addApproval happened on different in-memory instance than our local ref)
+  try {
+    const after = (Store as any).getById ? (Store as any).getById(req.id) : undefined;
+    if (!after) {
+      audit('approval_store_miss', { request_id: req.id, actor, identity, phase: 'post_add' });
+    } else if (after !== req) {
+      // Our local reference diverged from canonical mutated record; adopt counts/status from canonical.
+      const afterId = (after as any).__identity;
+      audit('approval_reference_diverged', { request_id: req.id, actor, identity_orig: identity, identity_fresh: afterId, count_orig: req.approvals_count, count_fresh: after.approvals_count });
+      if (req.approvals_count === 0 && after.approvals_count > 0) {
+        (req as any).approvals_count = after.approvals_count;
+      }
+      req = after; // adopt canonical for remainder
+    }
+  } catch { /* ignore */ }
   // After store mutation, verify that approvals_count changed or can be recomputed. If still unchanged,
   // emit a divergence event (always-on) to aid CI diagnosis.
   if (req.approvals_count === prevCount) {
@@ -118,7 +155,7 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       }
     }
   } catch {/* ignore */}
-  audit('approval_added', { request_id: req.id, actor, count: req.approvals_count, identity, store_instance: getStoreInstanceId?.() });
+  audit('approval_added', { request_id: req.id, actor, count: req.approvals_count, identity: (req as any).__identity || identity, store_instance: getStoreInstanceId?.() });
   if (debug) {
     try {
       const postList = (Store.approvalsFor as any)(req.id);

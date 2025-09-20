@@ -99,4 +99,9 @@ export async function *exportAudit(opts: AuditExportOptions): AsyncGenerator<Rec
   yield * sink.export(opts);
 }
 
+// Test-only helper: reset audit sink so that backend env vars can be changed between tests.
+export function __TEST_resetAudit() {
+  if (process.env.VITEST === '1') sink = undefined;
+}
+
 export type { AuditExportOptions };
