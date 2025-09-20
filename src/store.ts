@@ -43,7 +43,17 @@ function createMemoryStore(): IStore {
   return api as IStore;
 }
 
-let backend: IStore = createMemoryStore();
+// Ensure a true singleton across potential module duplication (Vitest / ESM reload edge cases)
+const STORE_SYMBOL = Symbol.for('approval_service.store');
+interface GlobalStoreBag { instance: IStore; instanceId: string; _clear?: () => void; }
+const bag: GlobalStoreBag = (globalThis as any)[STORE_SYMBOL] || (() => {
+  const inst = createMemoryStore();
+  const id = crypto.randomUUID();
+  const g: GlobalStoreBag = { instance: inst, instanceId: id };
+  (globalThis as any)[STORE_SYMBOL] = g;
+  return g;
+})();
+let backend: IStore = bag.instance;
 
 if (process.env.STORE_BACKEND === 'redis') {
   try {
@@ -57,6 +67,7 @@ if (process.env.STORE_BACKEND === 'redis') {
 }
 
 export const Store: IStore = backend;
+export function getStoreInstanceId() { return (globalThis as any)[STORE_SYMBOL]?.instanceId as string; }
 
 // Legacy __INTERNAL export retained for compatibility (now empty; retention uses instance methods directly)
 export const __INTERNAL = {};
@@ -65,15 +76,9 @@ export const __INTERNAL = {};
 // Exposed for test isolation to avoid cross-file contamination of in-memory state.
 // Safe no-ops for non-memory backends (e.g., redis) – tests expecting isolation should run single-worker.
 export function __TEST_clearStore() {
-  if (process.env.VITEST !== '1') return; // guard against accidental prod invocation
-  // Best-effort: if backend is memory we can reach into known fields by recreating a fresh store.
-  // Simpler approach: reinitialize memory backend when not using redis.
-  if (process.env.STORE_BACKEND === 'redis') {
-    // For redis backend (future), skipping automatic purge to avoid dropping shared dev data.
-    return;
-  }
-  // Recreate memory store and reassign exported Store reference fields (mutable properties not exported; we rebind methods)
+  if (process.env.VITEST !== '1') return;
+  if (process.env.STORE_BACKEND === 'redis') return;
+  // Rebuild memory backend but keep global singleton identity and instanceId stable for diagnostics
   const fresh = createMemoryStore();
-  // Copy properties (methods) onto existing object reference so imported Store retains identity
   Object.assign(Store as any, fresh);
 }

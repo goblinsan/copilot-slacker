@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { Store } from './store.js';
+import { Store, getStoreInstanceId } from './store.js';
 import type { GuardRequestRecord } from './types.js';
 import { audit } from './log.js';
 import { incCounter, observeDecisionLatency } from './metrics.js';
@@ -43,7 +43,7 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       if (Array.isArray(approvers)) {
         const recomputed = approvers.length;
         if (recomputed !== req.approvals_count) {
-          audit('approval_count_fallback', { request_id: req.id, actor, observed: req.approvals_count, recomputed });
+          audit('approval_count_fallback', { request_id: req.id, actor, observed: req.approvals_count, recomputed, store_instance: getStoreInstanceId?.() });
           (req as any).approvals_count = recomputed; // direct mutation safe for in-memory test path
         }
       }
