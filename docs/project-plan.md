@@ -1,7 +1,7 @@
 # Approval Service Project Plan
 
 Status: Draft  
-Last Updated: 2025-09-20 (completed items 37,39,40; policy hot-reload added)
+Last Updated: 2025-09-20 (completed items 37,39,40,41; retention & archival added)
 
 ## 1. Overview
 This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
@@ -48,7 +48,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |38 | OTLP trace exporter option | Env toggle to export spans to OTLP endpoint (OTLP_ENDPOINT, OTLP_HEADERS, OTLP_TIMEOUT_MS) | 11,26 | 4 | Spans visible in external collector when configured | ✅ |
 |39 | Slack rate limit queue v2 | Coalesce rapid consecutive message updates & jitter backoff (with debounce) | 22 | 4 | Reduced duplicate updates under churn | ✅ |
 |40 | Policy hot-reload | Reload policies from disk/Redis on SIGHUP or admin endpoint | 10 | 4 | Policy changes applied without restart | ✅ |
-|41 | Retention & archival policy | TTL + archival export for audit + requests | 10 | 4 | Documented retention config & automated purge |  |
+|41 | Retention & archival policy | TTL + archival export for audit + requests | 10 | 4 | Documented retention config & automated purge | ✅ |
 |28 | Metrics reference documentation | Dedicated docs/metrics.md detailing each metric & labels | 11,19,23,24,25 | 4 | File published & linked from README | ✅ |
 |29 | Distributed replay/rate limit cache | Redis-backed replay + rate limit synchronization | 4,8 | 4 | Replay & rate limits function across multi-instance |  |
 |30 | Override governance policy | Enforce allowed override keys + optional diff size limit | 9 | 3 | Attempts exceeding limits rejected & audited | ✅ |

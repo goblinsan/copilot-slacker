@@ -1,0 +1,5 @@
+actions:
+  demo:
+    approvers:
+      allowSlackIds: [U1]
+      minApprovals: 1

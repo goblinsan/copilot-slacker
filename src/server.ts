@@ -15,6 +15,7 @@ import { markAndCheckReplay } from './replay.js';
 import { isAllowed as rateLimitAllowed } from './ratelimit.js';
 import { validateOverrides, totalOverrideCharSize, loadActionSchema } from './override-schema.js';
 import { withSpan, initTracing } from './tracing.js';
+import { startRetentionSweeper } from './retention.js';
 
 const POLICY_PATH = process.env.POLICY_PATH || '.agent/policies/guards.yml';
 // Load initial policy; subsequent accesses should use getPolicy() for latest reference
@@ -547,6 +548,7 @@ export function startServer(port?: number): Promise<number> {
 if (!process.env.VITEST) {
   startServer();
   startScheduler();
+  startRetentionSweeper();
 }
 
 // SIGHUP-triggered policy reload (Unix-friendly). Ignored on Windows if signal unsupported.

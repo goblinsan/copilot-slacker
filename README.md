@@ -231,6 +231,9 @@ Planned enhancements (see project plan items 27–30):
   - `SLACK_RATE_BASE_DELAY_MS` (optional base backoff delay, default 300)
   - `SLACK_RATE_JITTER_MS` (optional added random jitter, default 150)
   - `ADMIN_TOKEN` (optional) shared secret required in `x-admin-token` header for admin endpoints (policy reload)
+  - `REQUEST_RETENTION_SEC` (optional integer >0) purge terminal (approved/denied/expired) requests older than this many seconds
+  - `REQUEST_RETENTION_SWEEP_SEC` (optional integer, default 60) interval between retention sweeps
+  - `REQUEST_ARCHIVE_FILE` (optional path) if set, purged requests appended as JSONL (fields: version,id,action,status,created_at,decided_at,archivedAt)
   - (Schema) Place per-action JSON schema in `.agent/schemas/<action>.json` to enable validation
   - `TLS_CERT_FILE` / `TLS_KEY_FILE` (optional TLS)
   - `TLS_CA_FILE` (optional, for mTLS)
@@ -259,6 +262,9 @@ Metrics:
 ```
 policy_reloads_total{source="api"} 1
 policy_reloads_total{source="sighup"} 0
+archived_requests_total{reason="retention"} 5
+purged_requests_total{reason="retention"} 5
+request_archive_failures_total{reason="retention"} 0
 ```
 
 SIGHUP support: sending `SIGHUP` (Unix) to the process triggers the same reload path (no auth required, assumed operational control context).
