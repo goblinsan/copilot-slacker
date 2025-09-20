@@ -227,6 +227,9 @@ Planned enhancements (see project plan items 27–30):
   - `OTLP_ENDPOINT` (optional) URL for OTLP HTTP trace exporter (e.g. https://otel-collector:4318/v1/traces)
   - `OTLP_HEADERS` (optional) comma-separated key=value pairs added as HTTP headers (e.g. `Authorization=Bearer abc123,X-Env=staging`)
   - `OTLP_TIMEOUT_MS` (optional) request timeout for OTLP exporter
+  - `SLACK_UPDATE_QUEUE` (`true|false`) enable coalescing queue for Slack message updates (reduces rate limit pressure)
+  - `SLACK_RATE_BASE_DELAY_MS` (optional base backoff delay, default 300)
+  - `SLACK_RATE_JITTER_MS` (optional added random jitter, default 150)
   - (Schema) Place per-action JSON schema in `.agent/schemas/<action>.json` to enable validation
   - `TLS_CERT_FILE` / `TLS_KEY_FILE` (optional TLS)
   - `TLS_CA_FILE` (optional, for mTLS)

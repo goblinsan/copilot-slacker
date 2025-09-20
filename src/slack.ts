@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { WebClient } from '@slack/web-api';
 import { withSpan } from './tracing.js';
+import { enqueueUpdate } from './slack-queue.js';
 import type { GuardRequestRecord } from './types.js';
 
 const slackToken = process.env.SLACK_BOT_TOKEN || '';
@@ -40,25 +41,38 @@ export async function postRequestMessage(req: GuardRequestRecord, channel: strin
 
 export async function updateRequestMessage(req: GuardRequestRecord) {
   if(!req.slack_channel || !req.slack_message_ts) return;
-  await withSpan('slack.update_message', async span => {
-    span.setAttribute?.('request_id', req.id);
-    span.setAttribute?.('action', req.action);
-    const header = `Guard Request: ${req.action}`;
-    const personaBlocks = buildPersonaBlocks(req);
-    const remaining = timeRemainingLine(req);
-    await slackClient.chat.update({
-      channel: req.slack_channel!,
-      ts: req.slack_message_ts!,
-      text: header,
-      blocks: [
-        { type: 'header', text: { type: 'plain_text', text: header } },
-        { type: 'context', elements: [ { type: 'mrkdwn', text: `Repo: *${req.meta.origin.repo}* Branch: *${req.meta.origin.branch || ''}*` }, { type: 'mrkdwn', text: `Requester: ${req.meta.requester.display || req.meta.requester.id}` }, ...(remaining? [{ type:'mrkdwn', text: remaining }]:[]) ] },
-        { type: 'section', fields: [ { type: 'mrkdwn', text: `*Action*\n${req.action}`}, { type: 'mrkdwn', text: `*Justification*\n${req.meta.justification}` } ] },
-        ...personaBlocks.body,
-        ...actionButtons(req)
-      ]
+  const queueEnabled = process.env.SLACK_UPDATE_QUEUE === 'true';
+  const header = `Guard Request: ${req.action}`;
+  const personaBlocks = buildPersonaBlocks(req);
+  const remaining = timeRemainingLine(req);
+  const body = {
+    text: header,
+    blocks: [
+      { type: 'header', text: { type: 'plain_text', text: header } },
+      { type: 'context', elements: [ { type: 'mrkdwn', text: `Repo: *${req.meta.origin.repo}* Branch: *${req.meta.origin.branch || ''}*` }, { type: 'mrkdwn', text: `Requester: ${req.meta.requester.display || req.meta.requester.id}` }, ...(remaining? [{ type:'mrkdwn', text: remaining }]:[]) ] },
+      { type: 'section', fields: [ { type: 'mrkdwn', text: `*Action*\n${req.action}`}, { type: 'mrkdwn', text: `*Justification*\n${req.meta.justification}` } ] },
+      ...personaBlocks.body,
+      ...actionButtons(req)
+    ]
+  };
+  if (queueEnabled) {
+    // enqueue without awaiting; span just wraps enqueue operation
+    await withSpan('slack.update_message', async span => {
+      span.setAttribute?.('request_id', req.id);
+      span.setAttribute?.('action', req.action);
+      enqueueUpdate(req.slack_channel!, req.slack_message_ts!, body);
     });
-  });
+  } else {
+    await withSpan('slack.update_message', async span => {
+      span.setAttribute?.('request_id', req.id);
+      span.setAttribute?.('action', req.action);
+      await slackClient.chat.update({
+        channel: req.slack_channel!,
+        ts: req.slack_message_ts!,
+        ...body
+      });
+    });
+  }
 }
 
 export async function postEscalationNotice(req: GuardRequestRecord) {
