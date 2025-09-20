@@ -1,5 +1,6 @@
 import type { ApprovalRecord, GuardRequestRecord, PersonaSignalRecord, RequestStatus } from './types.js';
 import crypto from 'node:crypto';
+import { audit } from './log.js';
 
 export interface IStore {
   createRequest(rec: Omit<GuardRequestRecord,'id'>): GuardRequestRecord | Promise<GuardRequestRecord>;
@@ -27,7 +28,7 @@ function createMemoryStore(): IStore {
     getByToken(token: string) { return [...requests.values()].find(r => r.token === token); },
     getById(id: string) { return requests.get(id); },
     updateStatus(id: string, from: RequestStatus[], to: RequestStatus) { const r = requests.get(id); if(!r) return; if(!from.includes(r.status)) return; r.status = to; if(['approved','denied','expired'].includes(to)) r.decided_at = new Date().toISOString(); return r; },
-  addApproval(a: ApprovalRecord) { const list = approvals.get(a.request_id)||[]; list.push(a); approvals.set(a.request_id,list); const r = requests.get(a.request_id); if(r){ r.approvals_count = list.filter(x=>x.decision==='approved').length; try { const { audit } = require('./log.js'); audit('store_add_approval',{ request_id: a.request_id, list_len: list.length, count_field: r.approvals_count, identity: (r as any).__identity }); } catch {} } },
+  addApproval(a: ApprovalRecord) { const list = approvals.get(a.request_id)||[]; list.push(a); approvals.set(a.request_id,list); const r = requests.get(a.request_id); if(r){ const before = r.approvals_count; r.approvals_count = list.filter(x=>x.decision==='approved').length; audit('store_add_approval',{ request_id: a.request_id, list_len: list.length, count_field: r.approvals_count, before, identity: (r as any).__identity }); const fresh = requests.get(a.request_id); if(fresh && fresh !== r) { audit('store_identity_mismatch',{ request_id: a.request_id, orig_identity: (r as any).__identity, fresh_identity: (fresh as any).__identity }); } } },
     listApprovals(id: string) { return approvals.get(id)||[]; },
     setSlackMessage(id: string, channel: string, ts: string) { const r = requests.get(id); if(r){ r.slack_channel=channel; r.slack_message_ts=ts; } },
     updatePersonaState(request_id: string, persona: string, state: 'ack'|'rejected', actor_slack_id: string){ const list = personaSignals.get(request_id)||[]; let row = list.find(p=>p.persona===persona); const now = new Date().toISOString(); if(!row){ row={ id: crypto.randomUUID(), request_id, persona, actor_slack_id, state, created_at: now, updated_at: now }; list.push(row);} else { row.state=state; row.actor_slack_id=actor_slack_id; row.updated_at=now; } personaSignals.set(request_id,list); const req = requests.get(request_id); if(req) req.persona_state[persona]=state; },
@@ -54,6 +55,15 @@ const bag: GlobalStoreBag = (globalThis as any)[STORE_SYMBOL] || (() => {
   return g;
 })();
 let backend: IStore = bag.instance;
+
+// One-time module fingerprint audit to detect multiple ESM loads in CI.
+try {
+  const FP_SYMBOL = Symbol.for('approval_service.fp.store');
+  if (!(globalThis as any)[FP_SYMBOL]) {
+    (globalThis as any)[FP_SYMBOL] = true;
+    audit('module_fingerprint_store', { url: import.meta.url, store_instance: bag.instanceId });
+  }
+} catch {/* ignore */}
 
 if (process.env.STORE_BACKEND === 'redis') {
   try {

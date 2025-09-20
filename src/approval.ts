@@ -11,6 +11,16 @@ function approvalsSig(list: unknown): string | undefined {
   return list.slice().sort().join(',');
 }
 
+// Emit a one-time module fingerprint for diagnosing duplicate module loading in CI.
+// Uses a symbol on globalThis to avoid duplicate emission.
+try {
+  const FP_SYMBOL = Symbol.for('approval_service.fp.approval');
+  if (!(globalThis as any)[FP_SYMBOL]) {
+    (globalThis as any)[FP_SYMBOL] = true;
+    audit('module_fingerprint_approval', { url: import.meta.url, store_instance: getStoreInstanceId?.() });
+  }
+} catch {/* ignore fingerprint errors */}
+
 export type ApprovalResult = { ok: true; terminal?: boolean } | { ok: false; error: string };
 
 export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalResult {
@@ -96,6 +106,18 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       }
     }
   } catch { /* ignore */ }
+  // Reference divergence check: fetch request again (if getById available) and compare object identity & count.
+  try {
+    const fresh = (Store as any).getById ? (Store as any).getById(req.id) : undefined;
+    const freshSync = fresh && typeof fresh === 'object' ? fresh : undefined; // ignore promise (memory store is sync)
+    if (freshSync && freshSync !== req) {
+      audit('approval_reference_diverged', { request_id: req.id, actor, identity_orig: identity, identity_fresh: (freshSync as any).__identity, count_orig: req.approvals_count, count_fresh: freshSync.approvals_count });
+      // If fresh count differs and appears correct (>=1) while orig is 0, adopt it.
+      if (req.approvals_count === 0 && freshSync.approvals_count > 0) {
+        (req as any).approvals_count = freshSync.approvals_count;
+      }
+    }
+  } catch {/* ignore */}
   audit('approval_added', { request_id: req.id, actor, count: req.approvals_count, identity, store_instance: getStoreInstanceId?.() });
   if (debug) {
     try {
