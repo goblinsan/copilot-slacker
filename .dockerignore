@@ -1,0 +1,27 @@
+# Exclusions to shrink build context
+node_modules
+npm-debug.log*
+yarn.lock
+pnpm-lock.yaml
+.vscode
+.git
+.gitignore
+.dist
+coverage
+reports
+dist
+*.tgz
+.tmp
+.tmp_*
+.DS_Store
+*.swp
+.env*
+# Tests & local dev artifacts
+**/__tests__
+**/*.spec.ts
+**/*.test.ts
+scripts/load-sim.ts
+# Docs (not needed at runtime)
+docs
+# Local policy temp files
+tmp_policy_*.yml

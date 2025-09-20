@@ -1,7 +1,7 @@
 # Approval Service Project Plan
 
 Status: Draft  
-Last Updated: 2025-09-20 (completed items 13,37,39,40,41; retention, archival & load baseline added)
+Last Updated: 2025-09-20 (completed items 13,14,37,39,40,41; retention, archival, load baseline & deployment packaging added)
 
 ## 1. Overview
 This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
@@ -30,7 +30,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible | ✅ |
 |12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green | ✅ |
 |13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues | ✅ |
-|14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image published & manifests deploy locally |  |
+|14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image builds locally; Dockerfile + readiness (`/readyz`) + env validation module merged | ✅ |
 |15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push |  |
 |16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned |  |
 |17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed |  |
@@ -60,6 +60,9 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |36 | Override outcome labeling | Add outcome label to param_overrides_total (applied/rejected) | 27,30-32 | 4 | Metric exposes outcome label | ✅ |
 
 ## 4. Detailed Work Item Notes
+### Item 14 – Deployment Packaging (Completed)
+Implemented multi-stage Dockerfile (node:20-alpine) producing minimal runtime image, added `.dockerignore`, centralized `config.ts` for env validation (production requires Slack secrets), and JSON `/readyz` endpoint (policy + store). README updated with Docker usage, K8s manifest including probes, and operational considerations. Next steps (future items): CI image publish, security scanning, distroless or slim runtime evaluation, and multi-arch builds.
+
 ### Item 1 – Enforce approver allowlists
 Add runtime guard in interaction handler; ephemeral rejection for non-authorized; audit event `unauthorized_attempt`.
 

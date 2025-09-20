@@ -16,8 +16,10 @@ import { isAllowed as rateLimitAllowed } from './ratelimit.js';
 import { validateOverrides, totalOverrideCharSize, loadActionSchema } from './override-schema.js';
 import { withSpan, initTracing } from './tracing.js';
 import { startRetentionSweeper } from './retention.js';
+import { getConfig } from './config.js';
 
-const POLICY_PATH = process.env.POLICY_PATH || '.agent/policies/guards.yml';
+const cfg = getConfig();
+const POLICY_PATH = cfg.policyPath;
 // Load initial policy; subsequent accesses should use getPolicy() for latest reference
 loadPolicy(POLICY_PATH);
 
@@ -491,6 +493,34 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
         return json(res,500,{ error:'reload_failed', detail: String(e) });
       }
     });
+  }
+  if (req.method === 'GET' && req.url === '/readyz') {
+    try {
+      const policy = getPolicy();
+      const policyOk = !!policy;
+      // Basic store check: attempt a lightweight call if available
+      let storeOk = true;
+      let storeBackend: string = (process.env.STORE_BACKEND === 'redis') ? 'redis' : 'memory';
+      if (storeBackend === 'redis') {
+        try {
+          if (Store.listOpenRequests) {
+            const resTest = await Promise.race([
+              Promise.resolve(Store.listOpenRequests()),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 500))
+            ]);
+            if (!resTest) storeOk = true; // empty acceptable
+          }
+        } catch (e) {
+          storeOk = false;
+        }
+      }
+      const body = { status: (policyOk && storeOk) ? 'ok' : 'degraded', policy: policyOk ? 'loaded' : 'missing', store: storeOk ? 'ok' : 'error', backend: storeBackend };
+      res.writeHead((policyOk && storeOk) ? 200 : 503, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify(body));
+    } catch (e: any) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ status: 'error', error: e?.message || 'unknown' }));
+    }
   }
   notFound(res);
   }

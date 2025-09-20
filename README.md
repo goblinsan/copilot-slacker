@@ -346,5 +346,160 @@ Future Enhancements:
 * Slack API mock integration to exercise message update queue.
 * Persistent results file with timestamped runs for trend analysis.
 
+## Deployment
+
+### Docker
+Build the image (multi-stage, Node 20 Alpine):
+```bash
+docker build -t approval-service:local .
+```
+Run locally exposing port 8080:
+```bash
+docker run --rm -p 8080:8080 \
+  -e PORT=8080 \
+  -e SLACK_SIGNING_SECRET=changeme \
+  -e SLACK_BOT_TOKEN=xoxb-your-token \
+  approval-service:local
+```
+Readiness & health:
+```bash
+curl -s localhost:8080/healthz    # liveness/basic
+curl -s localhost:8080/readyz     # JSON readiness (policy + store)
+```
+Metrics:
+```bash
+curl -s localhost:8080/metrics | head
+```
+
+Environment (selected runtime vars):
+- `PORT` (default 8080 in container)
+- `POLICY_PATH` (default `.agent/policies/guards.yml` copied into image; mount volume to override)
+- `STORE_BACKEND=redis` and `REDIS_URL=redis://host:6379` to enable Redis persistence
+- `TRACING_ENABLED=true` + `TRACING_EXPORTER=otlp` + `OTLP_ENDPOINT=https://otel-collector:4318/v1/traces` for tracing
+- Override governance: `OVERRIDE_MAX_KEYS`, `OVERRIDE_MAX_CHARS`
+- Retention: `RETENTION_MAX_AGE_SEC`, `RETENTION_SWEEP_INTERVAL_SEC`, `RETENTION_ARCHIVE_DIR`
+
+Mount a custom policy file:
+```bash
+docker run --rm -p 8080:8080 \
+  -v $(pwd)/.agent/policies/guards.yml:/app/.agent/policies/guards.yml:ro \
+  -e SLACK_SIGNING_SECRET=... -e SLACK_BOT_TOKEN=... \
+  approval-service:local
+```
+
+### Kubernetes (Example)
+Minimal illustrative manifest (ConfigMap for policy, Deployment, Service):
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: approval-policy
+data:
+  guards.yml: |
+    version: 1
+    actions:
+      deploy_config:
+        allowlist: ["actor.id", "meta.origin.repo"]
+        minApprovals: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: approval-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: approval-service
+  template:
+    metadata:
+      labels:
+        app: approval-service
+    spec:
+      containers:
+        - name: app
+          image: your-registry/approval-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: SLACK_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: approval-secrets
+                  key: slack_signing_secret
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: approval-secrets
+                  key: slack_bot_token
+            - name: POLICY_PATH
+              value: /app/policies/guards.yml
+            - name: STORE_BACKEND
+              value: memory # switch to redis + add REDIS_URL for production persistence
+          volumeMounts:
+            - name: policy
+              mountPath: /app/policies
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: policy
+          configMap:
+            name: approval-policy
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: approval-service
+spec:
+  selector:
+    app: approval-service
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+```
+Notes:
+- Replace `your-registry/approval-service:latest` with a tagged image.
+- Use `STORE_BACKEND=redis` and inject `REDIS_URL` plus a Redis dependency if persistence / multi-pod reconciliation is required.
+- Scale replicas >1 only after enabling Redis to ensure consistent request state across pods.
+- Add NetworkPolicies, PodSecurityStandards, and secrets management (SealedSecrets / ExternalSecrets) in production.
+
+### Operational Considerations
+- Horizontal scaling: requires Redis backend to avoid diverging in-memory state.
+- Tracing: Deploy an OpenTelemetry collector; set OTLP vars.
+- Metrics: Add Prometheus scrape annotation or ServiceMonitor.
+- Policy changes: Update ConfigMap then `kubectl rollout restart deployment/approval-service` or use admin reload endpoint if file is mounted.
+- Backups: Archive directory (if used) should be on a persistent volume or exported to object storage.
+
+### Quick Verification Checklist
+1. `curl /healthz` returns `ok` (liveness)
+2. `curl /readyz` returns `{ status: "ok" ... }`
+3. `curl /metrics` exposes expected counters
+4. Create request → Slack message posts
+5. Approve in Slack → request transitions to `approved`
+6. Decision latency histogram increments (verify scrape)
+
 ## License
 Proprietary (example scaffolding).
