@@ -22,20 +22,29 @@ npm run typecheck   # TS compile check
 
 ## Smoke Test
 
-The smoke test creates a request and drives it to approval (unless personas gate it, in which case creation success is enough).
+The smoke test can exercise one or more terminal paths (approve, deny) plus perform metrics assertions.
 
 ```bash
 # Start server in one shell
 npm run dev &
-# Run smoke (defaults to port 8080)
+# Run default smoke (approve only, defaults to port 8080)
 npm run smoke
+
+# Run approve + deny
+npx tsx scripts/smoke.ts --scenarios=approve,deny
+
+# Override approver / denier user IDs (must exist in policy allowSlackIds)
+SMOKE_APPROVE_USER=U123 SMOKE_DENY_USER=U456 npx tsx scripts/smoke.ts --scenarios=approve,deny
+
+# (Placeholder) include expire scenario once fast timeout path exposed
+npx tsx scripts/smoke.ts --scenarios=approve,deny,expire
 ```
 
 CI will run the smoke script after the normal test/build cycle using the in-repo code.
 
 Exit codes:
 - 0 success
-- 1 failure (creation, approval, polling, or timeout)
+- 1 failure (creation, interaction, polling, metrics, or timeout)
 
 ## Redis vs Memory
 
@@ -55,3 +64,5 @@ When `PILOT_MODE=true`, capacity enforcement may reject creates if too many open
 
 - Load test harness (k6) once scaling targets are defined.
 - Additional persona revocation scenarios if feature is enabled.
+- Fast-expire scenario parameter (custom short timeout) for smoke `expire` validation.
+- Metrics delta validation (compare before/after rather than presence only).
