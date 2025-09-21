@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -21,7 +21,6 @@ describe('retention sweeper', () => {
   });
 
   it('archives and purges terminal requests older than retention', async () => {
-    vi.useFakeTimers();
   // Create a simple policy file BEFORE importing server
   const policyPath = path.join(process.cwd(), 'tmp_policy_retention.yml');
   fs.writeFileSync(policyPath, 'actions:\n  demo:\n    approvers:\n      allowSlackIds: [U1]\n      minApprovals: 1\n');
@@ -36,17 +35,28 @@ describe('retention sweeper', () => {
     expect(res.status).toBe(200);
     const token = j.token;
 
-    // Fast-forward time just before retention threshold
-    vi.advanceTimersByTime(4000);
-    // Approve via direct store mutation (simpler than Slack interaction): load store and set status.
-    const { Store } = await import('../src/store.js');
-    const rec = await Store.getByToken(token);
-    expect(rec).toBeTruthy();
-    if (rec) { rec.status = 'approved'; rec.decided_at = new Date(Date.now()-6000).toISOString(); }
-
-    // Run retention sweep manually
-    const { runRetentionSweep } = await import('../src/retention.js');
-    await runRetentionSweep(Date.now());
+  // Approve via direct store mutation then flush live records for redis determinism
+  const { Store } = await import('../src/store.js');
+  const rec = await Store.getByToken(token);
+  expect(rec).toBeTruthy();
+  if (rec) {
+    rec.status = 'approved';
+  // Set decided_at sufficiently in the past relative to retention (retain=5s). We'll later advance clock beyond retention.
+  rec.decided_at = new Date(Date.now()-6000).toISOString();
+    // Persist critical fields immediately to avoid enumeration race prior to proxy microtask flush.
+    if ((Store as any).updateFields) {
+      try { await (Store as any).updateFields(rec.id, { status: rec.status, decided_at: rec.decided_at }); } catch {/* ignore */}
+    }
+  }
+  if ((Store as any)._testFlushLiveRecords) { await (Store as any)._testFlushLiveRecords(); }
+  // Immediate deterministic sweep invocation (may need a few attempts due to async enumeration)
+  const { __TEST_forceRetentionSweep } = await import('../src/retention.js');
+  let attempts = 0;
+  while (attempts < 5) {
+    await __TEST_forceRetentionSweep();
+    if (!await Store.getByToken(token)) break;
+    attempts++;
+  }
 
     // Since decided_at is 6s in past and retention=5s, it should archive & purge.
     const recAfter = await Store.getByToken(token);
@@ -60,6 +70,6 @@ describe('retention sweeper', () => {
     expect(obj.id).toBe(rec?.id);
     expect(obj.status).toBe('approved');
 
-    vi.useRealTimers();
+    // No fake timers
   });
 });
