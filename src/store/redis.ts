@@ -1,6 +1,8 @@
 import { createClient, RedisClientType } from 'redis';
 import crypto from 'node:crypto';
 import type { IStore } from '../store.js';
+// Lazy import via dynamic require pattern is avoided; we import snapshot helper directly (circular safe: function only reads map)
+import { getOptimisticSnapshot } from '../approval.js';
 import type { ApprovalRecord, GuardRequestRecord, RequestStatus } from '../types.js';
 
 /**
@@ -16,7 +18,17 @@ export async function createRedisStore(): Promise<IStore> {
   await client.connect();
 
   async function getRequest(id: string): Promise<GuardRequestRecord | undefined> {
-    const raw = await client.get(`req:${id}`); if(!raw) return; return JSON.parse(raw);
+    const raw = await client.get(`req:${id}`); if(!raw) return; const parsed: GuardRequestRecord = JSON.parse(raw);
+    try {
+      const snap = getOptimisticSnapshot(id);
+      if (snap) {
+        // Only overlay if parsed record has not yet observed the optimistic state (avoid regressing durable values)
+        if (snap.approvals_count > (parsed as any).approvals_count) (parsed as any).approvals_count = snap.approvals_count;
+        if (snap.status && parsed.status !== snap.status) parsed.status = snap.status as any;
+        if (snap.decided_at && !parsed.decided_at) parsed.decided_at = snap.decided_at;
+      }
+    } catch { /* ignore snapshot overlay errors */ }
+    return parsed;
   }
   async function setRequest(r: GuardRequestRecord) {
     await client.set(`req:${r.id}`, JSON.stringify(r));

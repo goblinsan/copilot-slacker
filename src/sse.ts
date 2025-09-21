@@ -1,4 +1,5 @@
 import { Store } from './store.js';
+import { getOptimisticActors } from './approval.js';
 
 /**
  * Lightweight in-memory SSE subscription manager (sufficient for single-instance).
@@ -31,7 +32,9 @@ export async function emitState(token: string) {
   const l = listeners.get(token); if(!l) return;
   const record = await Store.getByToken(token);
   if (!record) { sendEvent(l.res,'state', JSON.stringify({ status:'expired'})); removeListener(token); return; }
-  const approvers = await Store.approvalsFor(record.id);
+  const persisted = await Store.approvalsFor(record.id);
+  const optimistic = getOptimisticActors(record.id);
+  const approvers = Array.from(new Set([...(persisted||[]), ...optimistic]));
   sendEvent(l.res,'state', JSON.stringify({ status: record.status, approvers, decidedAt: record.decided_at }));
   if(['approved','denied','expired'].includes(record.status)) {
     // Defer removal to next tick to allow the event to flush to the client

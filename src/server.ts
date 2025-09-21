@@ -5,7 +5,7 @@ import { CreateRequestInputSchema, WaitRequestInputSchema, RequestStatus, Reques
 import { loadPolicy, evaluate, getPolicy, reloadPolicy } from './policy.js';
 import { Store } from './store.js';
 import { postRequestMessage, verifySlackSignature, updateRequestMessage, slackClient } from './slack.js';
-import { applyApproval, applyDeny } from './approval.js';
+import { applyApproval, applyDeny, getOptimisticActors } from './approval.js';
 import { startScheduler } from './scheduler.js';
 import crypto from 'node:crypto';
 import { audit } from './log.js';
@@ -592,7 +592,9 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
 async function terminalAsync(rPromise: ReturnType<typeof Store.getByToken>): Promise<any> {
   const r = await rPromise as any;
   if(!r) return { status: 'expired' };
-  const approvers = await Store.approvalsFor(r.id);
+  const approversPersisted = await Store.approvalsFor(r.id);
+  const optimistic = getOptimisticActors(r.id);
+  const approvers = Array.from(new Set([...(approversPersisted||[]), ...optimistic]));
   return { status: r.status, approvers, decidedAt: r.decided_at };
 }
 

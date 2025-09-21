@@ -27,6 +27,16 @@ export type ApprovalResult = { ok: true; terminal?: boolean } | { ok: false; err
 const approvalSeq = new Map<string, number>();
 function nextSeq(id: string) { const n = (approvalSeq.get(id) || 0) + 1; approvalSeq.set(id, n); return n; }
 
+// Track optimistic approvers for async backends (redis) so that wait endpoints can merge
+// these with persisted approvals list before the underlying async add finishes.
+const optimisticActorsByRequest = new Map<string, Set<string>>();
+export function getOptimisticActors(id: string): string[] { return Array.from(optimisticActorsByRequest.get(id) || []); }
+// Track optimistic request-level terminal/count metadata so async Store.getById callers can observe
+// the approved state immediately (before network round‑trips complete). This is a best-effort, non-durable
+// cache used only for read-after-write semantics in tests / wait endpoints.
+const optimisticRequestSnapshot = new Map<string, { approvals_count: number; status: string; decided_at?: string }>();
+export function getOptimisticSnapshot(id: string) { return optimisticRequestSnapshot.get(id); }
+
 export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalResult {
   // Capture the original request id early so that even if we adopt a canonical object later, stage sequencing
   // remains anchored to the stable id (avoids seq reset / undefined id when an async getById Promise was mistakenly adopted).
@@ -131,6 +141,25 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     stage('fast_path_applied');
   }
   const prevCount = req.approvals_count;
+  // Local optimistic approver set (non-persistent) to ensure duplicate detection & quorum evaluation
+  const OPT_KEY = '__optimisticActors';
+  let optimistic: Set<string> | undefined = (req as any)[OPT_KEY];
+  if (!optimistic) {
+    optimistic = new Set<string>();
+    (req as any)[OPT_KEY] = optimistic;
+  }
+  // Seed with any existing approvals list if available synchronously (memory store path)
+  try {
+    const existing = (Store.approvalsFor as any)(req.id);
+    if (Array.isArray(existing)) existing.forEach(a => optimistic!.add(a));
+  } catch {/* ignore */}
+  const hadActorOptimistic = optimistic.has(actor);
+  if (hadActorOptimistic) {
+    audit('approval_rejected_duplicate_optimistic', { request_id: req.id, actor });
+    stage('exit_duplicate_optimistic');
+    audit('approval_exit',{ request_id: req.id, actor, reason: 'duplicate_optimistic' });
+    return { ok: false, error: 'duplicate' };
+  }
   try {
     const addResult = (Store.addApproval as any)({
       id: crypto.randomUUID(),
@@ -140,14 +169,54 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       decision: 'approved',
       created_at: new Date().toISOString()
     });
+    // Immediately reflect optimistic actor for async stores so subsequent calls see updated state.
+    optimistic.add(actor);
+    // Update global optimistic registry for merging in wait endpoints
+    let globalSet = optimisticActorsByRequest.get(req.id); if(!globalSet){ globalSet = new Set(); optimisticActorsByRequest.set(req.id, globalSet); }
+    globalSet.add(actor);
+    if (req.approvals_count === prevCount) {
+      (req as any).approvals_count = optimistic.size;
+    }
+    // If async and non-terminal, persist the updated count early to reduce race windows with immediate fetches
+    if (addResult && typeof addResult.then === 'function' && req.approvals_count === optimistic.size && req.status === 'ready_for_approval') {
+      try {
+        if ((Store as any).updateFields) {
+          Promise.resolve((Store as any).updateFields(req.id, { approvals_count: req.approvals_count }))
+            .then(()=> audit('approval_async_persisted_nonterminal', { request_id: req.id, actor, count: req.approvals_count }))
+            .catch(()=>{});
+        }
+      } catch {/* ignore */}
+    }
+    // If quorum reached via optimistic path, mark terminal prior to awaiting backend persistence.
+    if (req.approvals_count >= req.min_approvals && req.status === 'ready_for_approval') {
+  req.status = 'approved';
+  req.decided_at = new Date().toISOString();
+  optimisticRequestSnapshot.set(req.id, { approvals_count: req.approvals_count, status: req.status, decided_at: req.decided_at });
+      audit('request_approved', { request_id: req.id, actor, optimistic: true });
+      stage('exit_terminal_approved_optimistic');
+      audit('approval_exit',{ request_id: req.id, actor, reason: 'success_terminal_optimistic' });
+      incCounter('approvals_total',{ action: req.action });
+      const latencySecOpt = (new Date(req.decided_at).getTime() - new Date(req.created_at).getTime())/1000;
+      observeDecisionLatency(latencySecOpt,{ action: req.action, outcome: 'approved' });
+      // Fire persistence sync immediately (fire-and-forget) then optional microtask confirm.
+      if ((Store as any).updateFields) {
+        try {
+          Promise.resolve((Store as any).updateFields(req.id, { status: req.status, approvals_count: req.approvals_count, decided_at: req.decided_at }))
+            .then(()=> audit('approval_async_persisted', { request_id: req.id, actor, optimistic: true, immediate: true }))
+            .catch(()=>{});
+        } catch {/* ignore */}
+      }
+      return { ok: true, terminal: true };
+    }
     // If the store returns a Promise (async backend like redis), we cannot rely on immediate in-object mutation.
     if (addResult && typeof addResult.then === 'function') {
       audit('approval_async_add_detected', { request_id: requestId, actor, min_approvals: req.min_approvals, count_before: req.approvals_count });
       // For min_approvals == 1 we optimistically finalize to avoid test / SSE stalls; backend completion will be idempotent.
       if (req.min_approvals === 1 && req.approvals_count === 0) {
-        (req as any).approvals_count = 1;
-        req.status = 'approved';
-        req.decided_at = new Date().toISOString();
+  (req as any).approvals_count = 1;
+  req.status = 'approved';
+  req.decided_at = new Date().toISOString();
+  optimisticRequestSnapshot.set(req.id, { approvals_count: 1, status: 'approved', decided_at: (req as any).decided_at });
         audit('approval_async_assumed_terminal', { request_id: requestId, actor });
         // Best-effort immediate sync of underlying store object if a separate canonical instance exists (common in async backends)
         try {
@@ -160,15 +229,12 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
           }
         } catch { /* ignore */ }
         // Fire an async persistence path for stores exposing updateFields (e.g., redis) to ensure status durability.
+        // Immediate persistence attempt (fire-and-forget)
         try {
           if ((Store as any).updateFields) {
-            queueMicrotask(() => {
-              try {
-                Promise.resolve((Store as any).updateFields(req.id, { status: 'approved', approvals_count: 1, decided_at: (req as any).decided_at }))
-                  .then(() => audit('approval_async_persisted', { request_id: requestId, actor }))
-                  .catch(() => {/* swallow */});
-              } catch { /* ignore */ }
-            });
+            Promise.resolve((Store as any).updateFields(req.id, { status: 'approved', approvals_count: 1, decided_at: (req as any).decided_at }))
+              .then(() => audit('approval_async_persisted', { request_id: requestId, actor, fast_path: true, immediate: true }))
+              .catch(() => {/* swallow */});
           }
         } catch { /* ignore */ }
         // Emit a core post-add stage even though underlying async add not yet resolved for consistent stage triage.
@@ -305,8 +371,9 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     } catch { /* swallow */ }
   }
   if (req.approvals_count >= req.min_approvals) {
-    req.status = 'approved';
-    req.decided_at = new Date().toISOString();
+  req.status = 'approved';
+  req.decided_at = new Date().toISOString();
+  optimisticRequestSnapshot.set(req.id, { approvals_count: req.approvals_count, status: req.status, decided_at: req.decided_at });
     audit('request_approved', { request_id: req.id, actor });
     stage('exit_terminal_approved');
     audit('approval_exit',{ request_id: req.id, actor, reason: 'success_terminal' });
@@ -323,8 +390,9 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       if (unique.size >= req.min_approvals && req.status === 'ready_for_approval') {
         audit('approval_quorum_recomputed', { request_id: req.id, actor, observed_count: req.approvals_count, unique_size: unique.size });
         req.approvals_count = unique.size;
-        req.status = 'approved';
-        req.decided_at = new Date().toISOString();
+  req.status = 'approved';
+  req.decided_at = new Date().toISOString();
+  optimisticRequestSnapshot.set(req.id, { approvals_count: req.approvals_count, status: req.status, decided_at: req.decided_at });
         audit('request_approved', { request_id: req.id, actor, recompute: true });
         stage('exit_terminal_approved_recompute');
         audit('approval_exit',{ request_id: req.id, actor, reason: 'success_terminal_recompute' });
@@ -336,9 +404,10 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       // Final guard just before nonterminal exit: if min_approvals == 1 and actor is present in list, force terminal.
       if (req.min_approvals === 1 && unique.has(actor) && req.status === 'ready_for_approval' && req.approvals_count === 0) {
         audit('approval_quorum_forced_final', { request_id: req.id, actor, reason: 'actor_present_list_zero_count' });
-        req.approvals_count = 1;
-        req.status = 'approved';
-        req.decided_at = new Date().toISOString();
+  req.approvals_count = 1;
+  req.status = 'approved';
+  req.decided_at = new Date().toISOString();
+  optimisticRequestSnapshot.set(req.id, { approvals_count: 1, status: 'approved', decided_at: req.decided_at });
         audit('request_approved', { request_id: req.id, actor, forced: true });
         stage('exit_terminal_approved_forced');
         audit('approval_exit',{ request_id: req.id, actor, reason: 'success_terminal_forced' });
