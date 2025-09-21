@@ -94,4 +94,7 @@ defineCounter('request_archive_failures_total','Archive write failures (labels: 
 
 export function resetAllMetrics(){ for (const c of Object.values(counters)) c.values.clear(); decisionLatencyHists.splice(0, decisionLatencyHists.length); }
 
+// Test helper: force internal microtasks to settle (currently synchronous; placeholder for future async batching)
+export async function __TEST_metricsFlush(){ /* no-op presently */ }
+
 function formatLabelSet(labels: LabelSet): string { return Object.entries(labels).map(([k,v])=>`${k}="${v}"`).join(','); }

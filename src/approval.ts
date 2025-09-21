@@ -400,6 +400,20 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       }
     } catch { /* swallow */ }
   }
+  // If after all adjustments approvals_count >= min_approvals and status not yet approved (possible on async backend), finalize & record latency.
+  if (req.approvals_count >= req.min_approvals && req.status === 'ready_for_approval') {
+    req.status = 'approved';
+    req.decided_at = new Date().toISOString();
+    optimisticRequestSnapshot.set(req.id, { approvals_count: req.approvals_count, status: req.status, decided_at: req.decided_at });
+    audit('approval_post_finalize_async', { request_id: req.id, actor, count: req.approvals_count });
+    incCounter('approvals_total',{ action: req.action });
+    const latencySec = (new Date(req.decided_at).getTime() - new Date(req.created_at).getTime())/1000;
+    observeDecisionLatency(latencySec,{ action: req.action, outcome: 'approved' });
+    if ((Store as any).updateFields) {
+      try { Promise.resolve((Store as any).updateFields(req.id, { status: 'approved', approvals_count: req.approvals_count, decided_at: req.decided_at })).catch(()=>{}); } catch {/* ignore */}
+    }
+    return { ok: true, terminal: true };
+  }
   if (req.approvals_count >= req.min_approvals) {
   req.status = 'approved';
   req.decided_at = new Date().toISOString();

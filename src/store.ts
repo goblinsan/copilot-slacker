@@ -14,6 +14,7 @@ export interface IStore {
   hasApproval(request_id: string, actor: string): boolean | Promise<boolean>;
   approvalsFor(request_id: string): string[] | Promise<string[]>;
   listOpenRequests?(): Promise<GuardRequestRecord[]> | GuardRequestRecord[]; // non-terminal for scheduler
+  listAllRequests?(): Promise<GuardRequestRecord[]> | GuardRequestRecord[]; // full enumeration for retention/diagnostics
   updateFields?(id: string, patch: Partial<GuardRequestRecord>): void | Promise<void>;
   listLineageRequests?(lineage_id: string): GuardRequestRecord[] | Promise<GuardRequestRecord[]>;
 }
@@ -34,7 +35,8 @@ function createMemoryStore(): IStore {
     updatePersonaState(request_id: string, persona: string, state: 'ack'|'rejected', actor_slack_id: string){ const list = personaSignals.get(request_id)||[]; let row = list.find(p=>p.persona===persona); const now = new Date().toISOString(); if(!row){ row={ id: crypto.randomUUID(), request_id, persona, actor_slack_id, state, created_at: now, updated_at: now }; list.push(row);} else { row.state=state; row.actor_slack_id=actor_slack_id; row.updated_at=now; } personaSignals.set(request_id,list); const req = requests.get(request_id); if(req) req.persona_state[persona]=state; },
     hasApproval(request_id: string, actor: string){ return (approvals.get(request_id)||[]).some(a=>a.actor_slack_id===actor && a.decision==='approved'); },
     approvalsFor(request_id: string){ return (approvals.get(request_id)||[]).filter(a=>a.decision==='approved').map(a=>a.actor_slack_id); },
-    listOpenRequests(){ return [...requests.values()].filter(r => !['approved','denied','expired'].includes(r.status)); },
+  listOpenRequests(){ return [...requests.values()].filter(r => !['approved','denied','expired'].includes(r.status)); },
+  listAllRequests(){ return [...requests.values()]; },
     updateFields(id: string, patch: Partial<GuardRequestRecord>){ const r = requests.get(id); if(!r) return; Object.assign(r, patch); },
     listLineageRequests(lineage_id: string){ return [...requests.values()].filter(r => r.lineage_id === lineage_id); },
     // Internal helpers for retention
@@ -87,7 +89,10 @@ export const __INTERNAL = {};
 // Safe no-ops for non-memory backends (e.g., redis) – tests expecting isolation should run single-worker.
 export function __TEST_clearStore() {
   if (process.env.VITEST !== '1') return;
-  if (process.env.STORE_BACKEND === 'redis') return;
+  if (process.env.STORE_BACKEND === 'redis') {
+    try { const anyStore: any = Store as any; if (typeof anyStore._testFlushAll === 'function') { return anyStore._testFlushAll(); } } catch {/* ignore */}
+    return;
+  }
   // Rebuild memory backend but keep global singleton identity and instanceId stable for diagnostics
   const fresh = createMemoryStore();
   Object.assign(Store as any, fresh);

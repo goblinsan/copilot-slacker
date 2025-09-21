@@ -13,7 +13,11 @@ let timer: NodeJS.Timeout | undefined;
 
 export function startScheduler(intervalOverride?: number) {
   if (timer) return; // idempotent
-  const interval = intervalOverride ?? Number(process.env.SCHEDULER_INTERVAL_MS || 5000);
+  let base = intervalOverride ?? Number(process.env.SCHEDULER_INTERVAL_MS || 5000);
+  if (process.env.VITEST === '1' && !intervalOverride && !process.env.SCHEDULER_INTERVAL_MS) {
+    base = 500; // accelerate in tests for deterministic expiration/escalation/tracing
+  }
+  const interval = base;
   timer = setInterval(async () => {
     if (!Store.listOpenRequests) return; // backend may not support listing
     try {
