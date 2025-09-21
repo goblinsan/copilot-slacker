@@ -79,7 +79,14 @@ export async function createRedisStore(): Promise<IStore> {
     }
   }
   const api: IStore = {
-    async createRequest(rec) { const id = crypto.randomUUID(); const full: GuardRequestRecord = { ...rec, id }; await setRequest(full); return await getRequest(id); },
+    async createRequest(rec) {
+      const id = crypto.randomUUID();
+      const full: GuardRequestRecord = { ...rec, id } as GuardRequestRecord;
+      await setRequest(full);
+      const proxied = await getRequest(id);
+      // getRequest should always succeed immediately after set; fallback to original object if unexpected miss.
+      return (proxied ?? full) as GuardRequestRecord;
+    },
     async getByToken(token) { let cursor = 0; do { const scan = await client.scan(cursor, { MATCH: 'req:*', COUNT: 100 }); cursor = scan.cursor; for (const key of scan.keys) { const raw = await client.get(key); if(raw){ const obj: GuardRequestRecord = JSON.parse(raw); if (obj.token === token) { // persist any optimistic snapshot overlay via getRequest for consistent proxy semantics
       return await getRequest(obj.id); } } } } while (cursor !== 0); return undefined; },
     getById: getRequest,
@@ -95,8 +102,6 @@ export async function createRedisStore(): Promise<IStore> {
   async listOpenRequests() { const results: GuardRequestRecord[] = []; let cursor = 0; do { const scan = await client.scan(cursor,{ MATCH: 'req:*', COUNT: 100 }); cursor = scan.cursor; for (const key of scan.keys) { const raw = await client.get(key); if(!raw) continue; const obj: GuardRequestRecord = JSON.parse(raw); if(!['approved','denied','expired'].includes(obj.status)) results.push(obj); } } while (cursor !== 0); return results; },
     async updateFields(id, patch){ const r = await getRequest(id); if(!r) return; Object.assign(r, patch); await setRequest(r); }
     ,
-  // Internal diagnostics: dump all requests (used by retention sweep).
-  async _dumpAll() { const all: GuardRequestRecord[] = []; let cursor = 0; do { const scan = await client.scan(cursor,{ MATCH: 'req:*', COUNT: 200 }); cursor = scan.cursor; for (const key of scan.keys) { const raw = await client.get(key); if(!raw) continue; const obj: GuardRequestRecord = JSON.parse(raw); all.push(obj); } } while (cursor !== 0); return all; },
     async listLineageRequests(lineage_id) { const results: GuardRequestRecord[] = []; let cursor = 0; do { const scan = await client.scan(cursor,{ MATCH: 'req:*', COUNT: 100 }); cursor = scan.cursor; for (const key of scan.keys) { const raw = await client.get(key); if(!raw) continue; const obj: GuardRequestRecord = JSON.parse(raw); if(obj.lineage_id === lineage_id) results.push(obj); } } while (cursor !== 0); return results; }
   };
   return api;
