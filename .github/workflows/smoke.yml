@@ -26,6 +26,7 @@ jobs:
           SLACK_BOT_TOKEN: xoxb-test
           STORE_BACKEND: memory
           PILOT_MODE: 'false'
+          PORT: 8080
         run: |
           node dist/src/server.js &
           echo $! > server.pid
