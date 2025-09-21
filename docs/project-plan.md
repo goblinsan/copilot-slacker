@@ -1,72 +1,149 @@
+<small>Rewritten for clarity & MVP focus. Previous large tabular backlog compressed into prioritized tiers.</small>
+
 # Approval Service Project Plan
 
-Status: Draft  
-Last Updated: 2025-09-21 (post smoke script, dashboards scaffold, TESTING.md, scheduler deterministic test fix; SSE test stabilization pending)
+Status: MVP Convergence
+Last Updated: 2025-09-21 (post: approve/deny/expire smoke + metrics delta + escalation working; SSE stabilized; metric parsing fix)
 
-## 1. Overview
-This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
+---
+## 1. Purpose
+Define the minimal, stable, internally usable Approval Service (MVP) and the shortest path to reach and maintain it, while clearly separating fast-follower and deferred scope.
 
-## 2. Phased Roadmap (Suggested Order)
-1. Core Hardening (Auth + Approvals) – Items 1–3, 8
-2. Persistence & Lifecycle – Items 4–6
-3. Experience & Delivery – Items 7, 9
-4. Observability & Compliance – Items 10–13
-5. Deployment & Operations – Items 14–17
-6. Documentation & Polish – Item 18
+---
+## 2. Current Functional State (Snapshot)
+Implemented & validated:
+- Request lifecycle: create → (optional personas) → approve / deny / expire (with escalation) ✅
+- Policy engine: per-action allowlists, min approvals, personas, timeout, escalation config ✅
+- Security: Slack signature verify (HMAC), timestamp skew (<300s) (VERIFY/CONFIRM), replay guard (VERIFY), allowlist enforcement ✅
+- Re-request lineage: cooldown + simple rate limiting ✅
+- Overrides: schema validation, governance limits, metrics, audit ✅
+- Metrics: counters (requests, approvals, denies, expired, escalations, overrides, overrides_rejections, personas), decision latency histogram (action,outcome), gauges for open + oldest age ✅
+- SSE: state streaming + heartbeat + terminal close; test stabilized ✅
+- Scheduler: deterministic expiration + escalation timing ✅
+- Smoke: approve, deny, expire (with escalation) + metric delta validation ✅
+- Tracing: baseline spans + optional OTLP ✅
+- Docs: TESTING.md, policies, runbook (baseline) ✅
 
-## 3. Backlog (Work Items)
-| ID | Title | Description | Depends On | Phase | Exit Criteria | Complete |
-|----|-------|-------------|------------|-------|---------------|----------|
-| 1 | Enforce approver allowlists | Only allow listed Slack IDs / superApprovers to approve/deny; persist approver IDs | — | 1 | Unauthorized user attempt rejected & logged | ✅ |
-| 2 | Distinct multi-approval tracking | Track unique approvers; prevent duplicates; expose approvers array | 1 | 1 | `wait` response shows unique list; duplicates ignored | ✅ |
-| 3 | Persona acknowledgment interactions | Add checklist & gating; disable Approve until all personas ack | 1 | 1 | Approve button disabled until personas ack state reached | ✅ |
-| 4 | Redis persistence adapter | Replace in-memory store; TTL for pending; env `REDIS_URL` | 1 | 2 | All CRUD via Redis; restart doesn’t lose active requests | ✅ |
-| 5 | Timeout & escalation scheduler | Expire requests & fire single escalation notice (`escalateBeforeSec`); threaded Slack warning & dynamic remaining time | 4 | 2 | Escalation logged once then expiration transitions request | ✅ |
-| 6 | Re-request lineage & rate limiting | `lineage_id` + cooldown & per-lineage limits | 4 | 2 | Re-request button creates new request with lineage chain | ✅ |
-| 7 | SSE streaming endpoint | Real-time state push; heartbeat; polling fallback | 1 | 3 | Open connection receives state transitions instantly | ✅ |
-| 8 | Security hardening | Slack timestamp skew, replay guard, rate limits, mTLS option | 1 | 1 | All security tests pass; stale signatures rejected | ✅ |
-| 9 | Parameter override modal | Slack modal for Approve with edits; validate & merge | 2 | 3 | Edited params reflected in final decision payload | ✅ |
-|10 | Audit log persistence backend | Durable sink (file/Redis Stream); export tool | 4 | 4 | `audit export` returns filtered events | ✅ |
-|11 | Metrics & tracing | /metrics endpoint + OTEL spans | 4 | 4 | Prometheus scrape + minimal trace spans visible | ✅ |
-|12 | Expanded test suite | Integration, persona, timeout, replay, Redis tests | 4,5 | 4 | >85% critical path coverage; CI green | ✅ |
-|13 | Load & concurrency test | High-volume simulation; latency percentiles | 11 | 4 | Documented P50/P95 latency + no race issues | ✅ |
-|14 | Deployment & packaging | Dockerfile, k8s manifests, env validation | 4 | 5 | Image builds locally; Dockerfile + readiness (`/readyz`) + env validation module merged | ✅ |
-|15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push | ✅ |
-|16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned | ✅ |
-|17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed; doc published | ✅ |
-|18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged | ✅ |
-|19 | Metrics endpoint exposure | Implement `/metrics` (Prometheus text) exporting counters; add decision latency histogram skeleton | 11 | 4 | /metrics returns 200 with counters | ✅ |
-|20 | Approval latency histogram | Measure create→terminal duration; bucket & expose (now labeled with outcome) | 11 | 4 | Histogram shows non-zero observations | ✅ |
-|21 | Per-action escalation metrics | Tag counters by action & escalation state | 11 | 4 | Escalations labeled per action | ✅ |
-|22 | Slack rate limit backoff | Queue & retry Slack API calls with exponential backoff + jitter | 8 | 4 | No dropped messages under simulated 429 |  |
-|23 | Add outcome label to latency histogram | Record decision_latency_seconds per action & outcome (approved/denied/expired) | 11,19 | 4 | Histogram entries include outcome label | ✅ |
-|24 | Persona acknowledgment metrics | Counters & gauges for persona ack progress | 3 | 4 | persona_ack_total & persona_pending gauge present | ✅ |
-|25 | Live in-progress duration gauge | Track avg & max age for open requests per action | 11,19 | 4 | oldest_open_request_age_seconds & avg age metrics exposed | ✅ |
-|26 | Tracing spans (OTEL) | Add minimal spans around request lifecycle & Slack calls | 11 | 4 | Trace viewer shows end-to-end spans | ✅ |
-|27 | Parameter override metrics | Counter param_overrides_total{action,outcome} (applied/rejected) | 9 | 4 | Metric increments on successful override submission / rejection labeled | ✅ |
-|37 | Trace span assertion tests | Add tests ensuring critical spans emitted (create, approve, expire, escalate, slack.post/update) | 26 | 4 | Tests fail if span names missing | ✅ |
-|38 | OTLP trace exporter option | Env toggle to export spans to OTLP endpoint (OTLP_ENDPOINT, OTLP_HEADERS, OTLP_TIMEOUT_MS) | 11,26 | 4 | Spans visible in external collector when configured | ✅ |
-|39 | Slack rate limit queue v2 | Coalesce rapid consecutive message updates & jitter backoff (with debounce) | 22 | 4 | Reduced duplicate updates under churn | ✅ |
-|40 | Policy hot-reload | Reload policies from disk/Redis on SIGHUP or admin endpoint | 10 | 4 | Policy changes applied without restart | ✅ |
-|41 | Retention & archival policy | TTL + archival export for audit + requests | 10 | 4 | Documented retention config & automated purge | ✅ |
-|28 | Metrics reference documentation | Dedicated docs/metrics.md detailing each metric & labels | 11,19,23,24,25 | 4 | File published & linked from README | ✅ |
-|29 | Distributed replay/rate limit cache | Redis-backed replay + rate limit synchronization | 4,8 | 4 | Replay & rate limits function across multi-instance |  |
-|30 | Override governance policy | Enforce allowed override keys + optional diff size limit | 9 | 3 | Attempts exceeding limits rejected & audited | ✅ |
-|31 | Override schema validation | Per-action lightweight JSON schema for overrides | 9 | 3 | Invalid overrides rejected & audited | ✅ |
-|32 | Override diff size limit | Reject based on combined changed value length | 30 | 3 | Rejections audited with reason diff_size_exceeded | ✅ |
-|33 | Custom schema error messages | Allow per-property errorMessage override | 31 | 3 | Custom message appears in rejection audit & Slack error | ✅ |
-|34 | Override rejection counters | Add counters per rejection reason (limit/schema/diff) | 30,31,32 | 4 | /metrics exposes override_rejections_total{action,reason} | ✅ |
-|35 | Schema introspection endpoint | Expose GET /api/schemas/:action redacted view | 31 | 3 | Endpoint returns loaded schema subset | ✅ |
-|36 | Override outcome labeling | Add outcome label to param_overrides_total (applied/rejected) | 27,30-32 | 4 | Metric exposes outcome label | ✅ |
-|42 | Multi-arch image build | Build & publish linux/amd64 + linux/arm64 manifests | 14,15 | 5 | Release workflow publishes multi-arch image | ✅ |
-|43 | Distroless runtime image | Replace alpine final stage with distroless node base | 14 | 5 | Image passes tests; vuln count reduced | ✅ |
-|44 | SBOM & provenance | Generate SBOM (cyclonedx) + SLSA provenance attestation | 15 | 5 | Artifacts attached to release | ✅ |
-|45 | Image signing | Cosign sign & verify in deployment pipeline | 44 | 5 | Signatures verified pre-deploy |  |
-|46 | Weekly vuln re-scan workflow | Scheduled Trivy scan; open issue on new HIGH/CRITICAL | 15 | 5 | Issues auto-created on findings |  |
-|47 | Dependency update automation | Renovate/Dependabot config enabling PRs | 15 | 5 | Automated upgrade PRs merged after CI |  |
-|48 | Redis HA / failover test | Simulate primary failover; ensure no data loss | 4 | 5 | Documented procedure & success metrics |  |
-|49 | Slack 429 metrics & alerts | Expose counter/gauge for rate limit events | 22 | 4 | Alert fires on sustained 429s |  |
-|50 | Incident timeline template | Add template to runbook for postmortems | 16 | 6 | Template adopted in first incident |  |
+Gaps / To Confirm Quickly:
+- Replay cache & skew enforcement tests existence (if missing → add) ⚠️
+- Latency baseline recorded & documented (histogram percentiles) ⚠️
+- Escalation metric assertion in smoke (currently implicit, not enforced) ⚠️
+- README Quickstart path for new user (needs tightening) ⚠️
+
+---
+## 3. MVP Definition (Strict Scope)
+An internal pilot-ready service delivering: secure approval gating, observable metrics, deterministic terminal outcomes (approve/deny/expire), and policy-driven governance—without requiring horizontal scale or durability beyond current in-memory (explicitly documented) OR with Redis if already integrated.
+
+### MVP Acceptance Criteria
+| Domain | Criteria |
+|--------|---------|
+| Security | Valid signature + skew + replay protection enforced; unauthorized approver attempts audited. |
+| Lifecycle | Escalation fires once before expiry; expiry transitions within +/−5s of timeout. |
+| Approvals | Unique approver identities; duplicate suppressed; min approvals respected. |
+| Personas (Decision) | Personas optionally DEFERRED for MVP (decision: see §7). If enabled: gating correct; if deferred: documented limitation. |
+| Observability | Metrics counters & latency histogram present after smoke run; escalation & expired counters increase appropriately. |
+| Streaming | SSE emits ≥1 non-terminal state and closes on terminal; fallback polling works. |
+| Smoke Validation | Single command validates approve, deny, expire + metrics deltas (and escalation). |
+| Docs | Quickstart (run locally + run smoke) <10 mins; policy authoring guide; limitations section. |
+| Tracing | At least request create → terminal span chain present. |
+| Reliability | Five consecutive green test runs (including SSE) in CI. |
+
+### Explicit MVP Non-Goals
+- Horizontal scaling / distributed replay cache.
+- Advanced Slack rate limit adaptive queueing.
+- Signed container images & provenance enforcement (foundation exists but optional).
+- Incident process templates & HA failover drills.
+
+---
+## 4. Immediate MVP Closure Tasks (High Impact / Low Effort)
+| # | Task | Type | Effort | Status |
+|---|------|------|--------|--------|
+| M1 | Add escalation counter assertion to smoke (when expire scenario runs) | Test Hardening | XS | Pending |
+| M2 | Confirm / add timestamp skew & replay tests (fail on stale or replayed signature) | Security Test | S | Pending |
+| M3 | README Quickstart + Limitations + Slack setup snippet | Docs | S | Pending |
+| M4 | Latency baseline capture (P50/P95 approve & expire) & record in plan | Perf Baseline | XS | Pending |
+| M5 | SSE multi-run (5x) reliability check (optional gate) | Stability | XS | Pending |
+| M6 | Persona scope decision (Enable minimal flow or mark deferred) | Product Decision | XS | Pending |
+
+Completion of M1–M4 (and decision for M6) declares MVP; M5 optional but recommended.
+
+---
+## 5. Fast-Follower (Post-MVP, Near-Term)
+| ID | Item | Rationale |
+|----|------|-----------|
+| F1 | Slack rate limit backoff & metrics (former backlog #22/#49) | Prevent notification gaps under spike |
+| F2 | Distributed replay & rate limit cache (former #29) | Multi-instance readiness |
+| F3 | Image signing (former #45) | Supply chain integrity |
+| F4 | Weekly vulnerability scan workflow (former #46) | Continuous security posture |
+| F5 | Dependency automation (former #47) | Reduce drift & vuln window |
+| F6 | Redis HA / failover test (former #48) | Reliability maturity |
+| F7 | Incident timeline template (former #50) | Faster postmortems |
+
+---
+## 6. Deferred / Documented Limitations
+- No guaranteed durability without Redis (if running in-memory mode). Restart loses active requests.
+- Personas (if deferred) not enforced in MVP (document gating off).
+- No adaptive Slack 429 handling (may log `not_authed` or 429 errors; approvals still functional logically).
+- Single escalation notice; no re-escalation schedule.
+- No multi-region failover or DR automation beyond documented manual procedures.
+
+---
+## 7. Persona Flow Decision Placeholder
+Option A (Enable Now): Keep existing persona gating; add single persona smoke scenario.
+Option B (Defer): Disable persona requirement in default actions; document as post-MVP.  
+Action: Decide before declaring MVP to avoid ambiguity in policy examples.
+
+---
+## 8. Latency Baseline (To Populate After M4)
+```
+approve path  : P50= TBD ms, P95= TBD ms
+expire path   : P50= TBD s,  P95= TBD s
+```
+Collection Method: run `scripts/load-sim.ts` with 30 requests / concurrency 5; parse histogram.
+
+---
+## 9. Operational Run Quickstart (Draft)
+1. `npm ci && npm run build`
+2. `SLACK_SIGNING_SECRET=test_secret PORT=8080 node dist/src/server.js`
+3. Run smoke: `npx ts-node scripts/smoke.ts --scenarios=approve,deny,expire`
+4. Metrics: `curl :8080/metrics | grep approval_requests_total`
+5. SSE (manual): `curl -N 'http://localhost:8080/api/guard/wait-sse?token=...'`
+
+---
+## 10. MVP Exit Checklist
+| Item | Verified |
+|------|----------|
+| Smoke approve/deny/expire + escalation assertion passing | ☐ |
+| Replay + timestamp skew tests green | ☐ |
+| README Quickstart + Limitations merged | ☐ |
+| Latency baseline captured in plan | ☐ |
+| Five consecutive green CI runs (includes SSE) | ☐ |
+| Persona decision documented (enable or defer) | ☐ |
+| Tag `v0.9.0-mvp` created | ☐ |
+
+---
+## 11. Metrics (Reference)
+Key counters & histogram already exposed (see metrics documentation). Smoke validation ensures deltas for: approvals, denies, expired, escalations, requests, latency histogram presence.
+
+---
+## 12. Next Actions (Execution Order)
+1. Implement M1 (smoke escalation assertion)
+2. Implement M2 (security tests) – confirm existing first
+3. Implement M3 (README Quickstart)
+4. Capture M4 (latency) & update plan
+5. Decision M6 (personas)
+6. (Optional) M5 SSE multi-run guard
+
+---
+## 13. Changelog Note
+On MVP declaration create annotated tag with summary of implemented domains and explicit limitations.
+
+---
+## 14. Appendix: Historical Scope (Legacy Backlog)
+The pre-rewrite expansive backlog (IDs 1–50) has been triaged. Items not surfaced in sections 4–6 are implicitly deferred beyond fast-follower horizon.
+
+---
+End of Plan
 
 ## 4. Detailed Work Item Notes
 ### Item 14 – Deployment Packaging (Completed)
