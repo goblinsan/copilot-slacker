@@ -38,15 +38,16 @@ export async function createGuardRequest(port: number, partial?: any): Promise<{
 export async function approveRequest(port: number, requestId: string, userId = 'UAPP', signingSecret = 'test_secret'): Promise<{ code:number; body:string }> {
   const payloadObj = { type:'block_actions', user:{ id:userId }, actions:[{ action_id:'approve', value:requestId }] };
   const payload = JSON.stringify(payloadObj);
-  const ts = Math.floor(Date.now()/1000).toString();
-  const base = `v0:${ts}:${payload}`;
-  const sig = 'v0=' + crypto.createHmac('sha256', signingSecret).update(base).digest('hex');
   const form = new URLSearchParams({ payload });
+  const body = form.toString(); // Slack signs the raw body string
+  const ts = Math.floor(Date.now()/1000).toString();
+  const base = `v0:${ts}:${body}`;
+  const sig = 'v0=' + crypto.createHmac('sha256', signingSecret).update(base).digest('hex');
   return new Promise((resolve,reject)=>{
     const req = http.request({ port, path:'/api/slack/interactions', method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded', 'x-slack-request-timestamp': ts, 'x-slack-signature': sig } }, res=>{
       let chunks=''; res.on('data',c=>chunks+=c); res.on('end',()=>resolve({ code: res.statusCode||0, body: chunks }));
     });
-    req.on('error',reject); req.write(form.toString()); req.end();
+    req.on('error',reject); req.write(body); req.end();
   });
 }
 

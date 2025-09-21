@@ -1,7 +1,7 @@
 # Approval Service Project Plan
 
 Status: Draft  
-Last Updated: 2025-09-21 (added deterministic scheduler hook & tracing span test hardening (#37); shared test helpers consolidated; Docker build context fixed)
+Last Updated: 2025-09-21 (post smoke script, dashboards scaffold, TESTING.md, scheduler deterministic test fix; SSE test stabilization pending)
 
 ## 1. Overview
 This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
@@ -34,7 +34,7 @@ This plan tracks remaining work to take the Approval Service from scaffolding to
 |15 | CI/CD pipeline setup | GH Actions: lint, test, build, scan, tag release | 14 | 5 | Automated build+publish on tag push | ✅ |
 |16 | Operational runbook | Secret rotation, failover, escalation tuning, on-call | 10,11 | 5 | Runbook reviewed & versioned | ✅ |
 |17 | Production readiness checklist | Security & DR signoff, backups, thresholds | 16 | 5 | Checklist completed & signed; doc published | ✅ |
-|18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged |  |
+|18 | Documentation polish & examples | SSE usage, persona flow, lineage examples | 7,6 | 6 | Updated docs + examples merged | ✅ |
 |19 | Metrics endpoint exposure | Implement `/metrics` (Prometheus text) exporting counters; add decision latency histogram skeleton | 11 | 4 | /metrics returns 200 with counters | ✅ |
 |20 | Approval latency histogram | Measure create→terminal duration; bucket & expose (now labeled with outcome) | 11 | 4 | Histogram shows non-zero observations | ✅ |
 |21 | Per-action escalation metrics | Tag counters by action & escalation state | 11 | 4 | Escalations labeled per action | ✅ |
@@ -158,33 +158,63 @@ Outlined items 42–50 targeting operational hardening: multi-architecture distr
 | 49 (Slack 429 metrics & alerts) | Basic queue covers immediate need | Observed sustained 429 bursts |
 | 50 (Incident timeline template) | Runbook baseline established | First real incident / chaos exercise |
 
-## 11. Proposed Next Step Toward Live Testing
-Goal: Enable a limited staging pilot with real Slack workspace while minimizing blast radius.
+## 11. MVP Definition & Current Status
+MVP Intent: Provide a reliable internal approval workflow (create → gated → approve/deny/expire) with core security, persistence, observability, and deterministic lifecycle guarantees—sufficient for limited internal adoption and feedback before GA hardening.
 
-Recommended Immediate Iteration ("Pilot Readiness Sprint"):
-1. Complete Item 18 (Docs polish): add quickstart, SSE example curl, persona flow screenshots, lineage example stub.
-2. Implement Refinements R1, R2, R3 (fast wins that stabilize test surface & developer UX).
-3. Add basic staging deployment manifest (K8s or docker-compose) referencing current image + minimal secrets template.
-4. Introduce `PILOT_MODE=true` feature flag (optional) to:
-	- Force stricter logging redaction
-	- Enable verbose audit for all decisions
-	- Limit max concurrent open requests (configurable) to reduce risk
-5. Run a supervised pilot: 5–10 real requests exercising approval, persona ack, escalation, and expiration paths.
-6. Capture metrics & trace sample; document baseline dashboard JSON export.
+MVP Must-Haves (All Implemented Unless Noted):
+| Area | Requirement | Status | Notes |
+|------|-------------|--------|-------|
+| Auth & Allowlist | Enforce approver allowlists + superApprover bypass | ✅ | Audited unauthorized attempts |
+| Personas | Persona gating blocks early approval | ✅ | Checklist flow active |
+| Multi-Approver Integrity | Unique approvers, no duplicates | ✅ | Reflected in wait / SSE state |
+| Persistence | Redis adapter with TTL cleanup | ✅ | Restart resilience in place |
+| Lifecycle Timing | Escalation + expiration (single escalation) | ✅ | Deterministic test passing |
+| Streaming | SSE endpoint streams state + closes on terminal | ⚠️ | Test flakiness under investigation (R11) |
+| Security | Signature verify + replay defense + timestamp skew | ✅ | <300s skew enforced |
+| Overrides | Modal + governance + schema validation | ✅ | Metrics & audit emitted |
+| Observability (Core) | Metrics counters + decision latency histogram | ✅ | Outcome/action labels present |
+| Tracing | Minimal lifecycle spans + optional OTLP export | ✅ | Baseline spans present |
+| Smoke Validation | Approve scenario automated | ✅ | Deny/expire variants planned |
+| Tests | Scheduler deterministic + core integration | ✅ | SSE reliability enhancement pending |
+| Docs | Quickstart, personas, overrides, SSE, lineage | ✅ | MVP section added |
 
-Pilot Exit Criteria:
-* No unhandled errors in logs over pilot window.
-* All four terminal paths observed (approved, denied, expired, override applied/rejected).
-* Latency histogram populated with >5 samples per outcome label.
-* No Slack 429 warnings; escalation posted exactly once per request requiring it.
-* Docs quickstart followed by new engineer without assistance.
+Outstanding for MVP Declaration:
+1. R11: Stabilize SSE test (instrumentation + helper refactor) – ensure ≥5 consecutive green runs.
+2. Extend smoke script to include deny + expire scenarios (serial), assert metrics increments.
+3. Metrics sanity test: confirm histogram line & counters appear after scripted flow.
+4. Add lightweight SSE client code sample (if not already embedded) for internal integrators.
+5. Record latency baseline (P50/P95) from load sim in this section.
 
-Post-Pilot Immediate Follow-ups:
-* Decide priority between distributed replay cache (Item 29) vs. signing (Item 45) based on scaling outlook.
-* Begin adding metric alert thresholds (expired_total anomaly, escalation latency).
-* Schedule R10 load harness expansion.
+Post-MVP Priority (Early Hardening):
+1. Item 22 – Slack rate limit backoff & retry metrics.
+2. Choose between Item 29 (distributed replay/rate limit) vs Item 45 (image signing) based on adoption trajectory.
+3. Item 49 – Slack 429 metrics & alert thresholds.
+4. Item 50 – Incident timeline template.
 
----
+Refinement Items (Active / New):
+| Ref | Title | Purpose | Status |
+|-----|-------|---------|--------|
+| R2 | Unified test status polling helper | Reduce timing flakes | Planned |
+| R3 | Approval helper abstraction | Standardize request approval in tests | Planned |
+| R4 | TESTING.md (added) | Document deterministic hooks | ✅ |
+| R11 | SSE reliability & instrumentation | Eliminate flake, add `SSE_DEBUG` logging | In Progress |
+
+Latency Baseline Placeholder:
+```
+To be captured post SSE stabilization:
+create->approve P50: TBD ms, P95: TBD ms
+create->expire P50: TBD ms, P95: TBD ms
+```
+
+Smoke Scenarios Coverage Plan:
+| Scenario | Path | Expected Metrics Delta |
+|----------|------|------------------------|
+| Approve | create → approve | approval_requests_total +1; approvals_total +1; decision_latency_seconds +1 obs |
+| Deny | create → deny | approval_requests_total +1; denies_total +1; histogram +1 obs (outcome=denied) |
+| Expire | create → wait → expire | approval_requests_total +1; expired_total +1; histogram +1 obs (outcome=expired); escalations_total maybe +1 if escalateBeforeSec set |
+
+MVP Exit Gate: All Outstanding items above resolved + latency baseline captured + annotated tag (e.g. `v0.9.0-mvp`) created.
+
 
 ## 5. Acceptance Criteria (Roll-Up)
 | Category | Criteria |

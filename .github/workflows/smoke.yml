@@ -1,0 +1,46 @@
+name: Smoke
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - name: Install deps
+        run: npm ci
+      - name: Build dist
+        run: npm run build:dist
+      - name: Start server
+        env:
+          SLACK_SIGNING_SECRET: test_secret
+          SLACK_BOT_TOKEN: xoxb-test
+          STORE_BACKEND: memory
+          PILOT_MODE: 'false'
+        run: |
+          node dist/server.js &
+          echo $! > server.pid
+          sleep 1
+          curl -sf http://localhost:8080/healthz
+      - name: Run smoke script
+        env:
+          SLACK_SIGNING_SECRET: test_secret
+          PORT: 8080
+        run: npx tsx scripts/smoke.ts
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo 'No aggregated logs implemented yet.'
+      - name: Stop server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then kill $(cat server.pid) || true; fi

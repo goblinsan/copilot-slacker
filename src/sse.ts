@@ -14,11 +14,13 @@ interface Listener {
 }
 
 const listeners = new Map<string, Listener>(); // key = token
+const debug = process.env.SSE_DEBUG === '1';
 
 export function addListener(token: string, res: import('node:http').ServerResponse) {
   removeListener(token); // ensure single
   const listener: Listener = { token, res, heartbeatTimer: setInterval(()=> sendEvent(res,'heartbeat',''), 25000) };
   listeners.set(token, listener);
+  if (debug) console.log('[sse] addListener', token, 'listeners:', listeners.size);
 }
 
 export function removeListener(token: string) {
@@ -26,27 +28,34 @@ export function removeListener(token: string) {
   clearInterval(l.heartbeatTimer);
   try { l.res.end(); } catch {}
   listeners.delete(token);
+  if (debug) console.log('[sse] removeListener', token, 'remaining:', listeners.size);
 }
 
 export async function emitState(token: string) {
-  const l = listeners.get(token); if(!l) return;
+  const l = listeners.get(token); if(!l) { if (debug) console.log('[sse] emitState skip (no listener)', token); return; }
   const record = await Store.getByToken(token);
-  if (!record) { sendEvent(l.res,'state', JSON.stringify({ status:'expired'})); removeListener(token); return; }
+  if (!record) { sendEvent(l.res,'state', JSON.stringify({ status:'expired'})); if (debug) console.log('[sse] emitState expired', token); removeListener(token); return; }
   const persisted = await Store.approvalsFor(record.id);
   const optimistic = getOptimisticActors(record.id);
   const approvers = Array.from(new Set([...(persisted||[]), ...optimistic]));
+  if (debug) console.log('[sse] emitState', token, 'status:', record.status, 'approvers:', approvers);
   sendEvent(l.res,'state', JSON.stringify({ status: record.status, approvers, decidedAt: record.decided_at }));
   if(['approved','denied','expired'].includes(record.status)) {
+    if (debug) console.log('[sse] terminal state, scheduling removeListener', token);
     // Defer removal to next tick to allow the event to flush to the client
     setImmediate(() => removeListener(token));
   }
 }
 
 export async function broadcastForRequestId(requestId: string) {
+  if (debug) console.log('[sse] broadcastForRequestId', requestId, 'listeners:', listeners.size);
   for (const l of listeners.values()) {
     const maybe = await Promise.resolve(Store.getByToken(l.token));
     if (maybe && maybe.id === requestId) {
+      if (debug) console.log('[sse] broadcasting to token', l.token);
       void emitState(l.token);
+    } else if (debug) {
+      console.log('[sse] skipping token', l.token, 'no match');
     }
   }
 }

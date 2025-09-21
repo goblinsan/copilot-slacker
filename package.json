@@ -14,7 +14,8 @@
     "typecheck": "tsc -p . --noEmit",
   "test": "cross-env APPROVAL_STAGE_DIAG=1 vitest run --pool=threads --maxWorkers=1",
     "audit:export": "tsx src/cli-audit-export.ts",
-    "load-sim": "tsx scripts/load-sim.ts"
+    "load-sim": "tsx scripts/load-sim.ts",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
