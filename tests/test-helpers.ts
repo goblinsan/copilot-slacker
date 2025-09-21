@@ -14,7 +14,7 @@ export function httpRequest(port: number, path: string, method='GET', body?: any
   });
 }
 
-export async function createGuardRequest(port: number, partial?: any): Promise<{ token: string }> {
+export async function createGuardRequest(port: number, partial?: any): Promise<{ token: string; requestId: string }> {
   const base = {
     action: 'rerequest_demo',
     params: { foo: 'bar' },
@@ -26,5 +26,6 @@ export async function createGuardRequest(port: number, partial?: any): Promise<{
   };
   const res = await httpRequest(port, '/api/guard/request','POST', { ...base, ...(partial||{}) });
   if(res.code!==200) throw new Error('createGuardRequest failed: '+res.body);
-  return JSON.parse(res.body);
+  const parsed = JSON.parse(res.body);
+  return { token: parsed.token, requestId: parsed.requestId };
 }

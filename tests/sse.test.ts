@@ -2,17 +2,13 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startServer, getServer } from '../src/server.js';
 import { startScheduler, stopScheduler } from '../src/scheduler.js';
 import http from 'node:http';
+import { createGuardRequest } from './test-helpers.js';
 
 let port: number;
 
-function createRequest(action='rerequest_demo'): Promise<{token:string,id:string}> {
-  return new Promise((resolve,reject)=>{
-    const payload = JSON.stringify({ action, params:{}, meta:{ origin:{repo:'x'}, requester:{id:'u', source:'agent'}, justification:'test ok'} });
-    const req = http.request({ port, path:'/api/guard/request', method:'POST', headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(payload)}},res=>{
-      let d='';res.on('data',c=>d+=c);res.on('end',()=>{ try{ const j=JSON.parse(d); resolve({token:j.token,id:j.requestId}); } catch(e){reject(e);} });
-    });
-    req.on('error',reject); req.write(payload); req.end();
-  });
+async function createRequest(action='rerequest_demo'): Promise<{token:string,id:string}> {
+  const r = await createGuardRequest(port, { action, params:{}, meta:{ origin:{repo:'x'}, requester:{id:'u', source:'agent'}, justification:'test ok'} });
+  return { token: r.token, id: r.requestId } as any;
 }
 
 function sign(body: string, ts: string) {

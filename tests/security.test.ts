@@ -7,6 +7,7 @@ function fetchMetrics(): Promise<string> {
 }
 import { startServer, getServer } from '../src/server.js';
 import http from 'node:http';
+import { createGuardRequest } from './test-helpers.js';
 import { clearReplayCache } from '../src/replay.js';
 import { clearRateLimits, configureRateLimit } from '../src/ratelimit.js';
 
@@ -31,14 +32,9 @@ function interaction(payloadObj: any, override?: { ts?: string; sig?: string }) 
   });
 }
 
-function createRequest(): Promise<{token:string,id:string}> {
-  return new Promise((resolve,reject)=>{
-    const payload = JSON.stringify({ action:'rerequest_demo', params:{}, meta:{ origin:{repo:'x'}, requester:{id:'u', source:'agent'}, justification:'sec test'} });
-    const req = http.request({ port, path:'/api/guard/request', method:'POST', headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(payload)}},res=>{
-      let d='';res.on('data',c=>d+=c);res.on('end',()=>{ try{ const j=JSON.parse(d); resolve({token:j.token,id:j.requestId}); } catch(e){reject(e);} });
-    });
-    req.on('error',reject); req.write(payload); req.end();
-  });
+async function createRequest(): Promise<{token:string,id:string}> {
+  const r = await createGuardRequest(port, { action:'rerequest_demo', params:{}, meta:{ origin:{repo:'x'}, requester:{id:'u', source:'agent'}, justification:'sec test'} });
+  return { token: r.token, id: r.requestId } as any;
 }
 
 describe('security hardening', () => {

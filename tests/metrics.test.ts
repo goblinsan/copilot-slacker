@@ -3,6 +3,7 @@ import { startServer, getServer } from '../src/server.js';
 import { resetAllMetrics } from '../src/metrics.js';
 import { Store } from '../src/store.js';
 import http from 'node:http';
+import { createGuardRequest } from './test-helpers.js';
 import { startScheduler, stopScheduler } from '../src/scheduler.js';
 
 function httpRequest(path: string, method='GET', body?: any): Promise<{code:number, body:string}> {
@@ -26,17 +27,8 @@ describe('metrics exposure', () => {
   afterAll(() => { getServer().close(); stopScheduler(); });
 
   it('captures request creation and approval metrics', async () => {
-    const create = await httpRequest('/api/guard/request','POST',{
-      action:'rerequest_demo',
-      params:{foo:'bar'},
-      meta:{
-        origin:{ repo:'x/y' },
-        requester:{ id:'U1', source:'slack' },
-        justification:'test justification'
-      }
-    });
-    expect(create.code).toBe(200);
-    const token = JSON.parse(create.body).token;
+    const created = await createGuardRequest(serverPort, { action:'rerequest_demo', params:{foo:'bar'}, meta:{ origin:{ repo:'x/y' }, requester:{ id:'U1', source:'slack' }, justification:'test justification' } });
+    const token = created.token;
     // approve path not directly invoking /metrics update; just create then fetch metrics
     const metrics = await httpRequest('/metrics');
     expect(metrics.code).toBe(200);

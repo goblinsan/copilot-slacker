@@ -3,6 +3,7 @@ import { reloadPolicy, getPolicy } from '../src/policy.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { createGuardRequest } from './test-helpers.js';
 import yaml from 'yaml';
 
 function httpReq(opts: { path: string; method?: string; body?: any; headers?: Record<string,string> }, port: number): Promise<{code:number, body:string}> {
@@ -37,7 +38,7 @@ describe('policy hot reload (#40)', () => {
     process.env.POLICY_PATH = originalPath;
   });
   it('exposes new action only after reload', async () => {
-    const before = getPolicy();
+  const before = getPolicy();
     expect(before?.actions[tmpAction]).toBeUndefined();
     // Modify temp policy file properly via YAML
     const parsed = yaml.parse(fs.readFileSync(tmpPath,'utf8'));
