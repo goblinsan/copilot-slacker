@@ -127,6 +127,8 @@ async function main() {
     { name:'approvals_total', mustIncreaseIf: approveCount },
     { name:'denies_total', mustIncreaseIf: denyCount },
     { name:'expired_total', mustIncreaseIf: expireCount },
+    // Expect at least one escalation when an expire scenario runs (short timeout with escalateBeforeSec)
+    { name:'escalations_total', mustIncreaseIf: expireCount },
   ];
   function extractCounter(text:string, metric:string): number | undefined {
     // Prometheus exposition lines may look like:
