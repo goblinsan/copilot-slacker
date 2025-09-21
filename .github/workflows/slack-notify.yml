@@ -1,0 +1,24 @@
+name: Notify Slack on push
+
+on:
+  push:
+    branches: [ main ]  # adjust as needed
+  workflow_dispatch: {} # manual run button
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Post a message to Slack
+        uses: slackapi/slack-github-action@v2
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              ✅ `${{ github.repository }}`
+              Pushed `${{ github.sha }}` to *${{ github.ref_name }}* by `${{ github.actor }}`.
+              Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
