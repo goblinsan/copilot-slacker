@@ -196,12 +196,16 @@ async function main() {
   }
   for (const spec of specs) {
     if (spec.mustIncreaseIf>0) {
-      const beforeVal = extractCounter(metricsBefore, spec.name);
+      let beforeVal = extractCounter(metricsBefore, spec.name);
       const afterVal = extractCounter(metricsAfter, spec.name);
-      if (beforeVal === undefined || afterVal === undefined) {
-        throw new Error('missing metric '+spec.name+' (before='+(beforeVal===undefined?'undef':beforeVal)+', after='+(afterVal===undefined?'undef':afterVal)+')');
+      if (afterVal === undefined) {
+        throw new Error('missing metric '+spec.name+' after scenario');
       }
-      if (!(afterVal > beforeVal)) throw new Error('metric '+spec.name+' did not increase');
+      if (beforeVal === undefined) {
+        if (debug) console.log('SMOKE_DEBUG baseline metric missing treated as 0 ->', spec.name);
+        beforeVal = 0; // treat absent baseline as zero (first usage)
+      }
+      if (!(afterVal > beforeVal)) throw new Error('metric '+spec.name+' did not increase (before='+beforeVal+' after='+afterVal+')');
     }
   }
   if (expireCount>0) {
