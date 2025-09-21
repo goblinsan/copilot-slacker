@@ -227,6 +227,9 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     });
   audit('request_rerequested',{ new_id: rec.id, lineage_id: lineageId, actor });
   incCounter('approval_requests_total',{ action: rec.action });
+  if (process.env.METRICS_DEBUG === '1') {
+    console.log('[METRICS_DEBUG] increment approval_requests_total action=%s (rerequest)', rec.action);
+  }
     if (evalResult.channel) {
       postRequestMessage(rec, evalResult.channel).then(async ids => {
         await Store.setSlackMessage(rec.id, ids.channel, ids.ts);
@@ -307,6 +310,9 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     audit('pilot_request_created',{ id: rec.id, action: rec.action, status: rec.status });
   }
   incCounter('approval_requests_total',{ action: rec.action });
+  if (process.env.METRICS_DEBUG === '1') {
+    console.log('[METRICS_DEBUG] increment approval_requests_total action=%s (create)', rec.action);
+  }
   // Fire any SSE listeners waiting on this token
   // (Token is only known to creator, but ensure consistency if listener attached quickly)
   // We cannot map token->id easily here, emit by attempting emitState via token

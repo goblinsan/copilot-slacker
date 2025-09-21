@@ -59,15 +59,22 @@ async function fetchMetrics(port:number): Promise<string> {
 async function main() {
   const port = Number(process.env.SMOKE_PORT || process.env.PORT || 8080);
   const justification = 'smoke test path';
+  const debug = !!process.env.SMOKE_DEBUG;
+  // Capture baseline metrics BEFORE creating any requests so deltas are clean.
+  const metricsBaseline = await fetchMetrics(port);
+  if (debug) {
+    console.log('SMOKE_DEBUG baseline metrics snippet (first 20 lines):');
+    console.log(metricsBaseline.split(/\n/).slice(0,20).join('\n'));
+  }
   const createPayload = { action:'rerequest_demo', params:{ foo:'bar' }, meta:{ origin:{ repo:'smoke/repo'}, requester:{ id:'U1', source:'slack'}, justification } };
   const created = await httpJson(port,'/api/guard/request','POST', createPayload);
   if (created.code !== 200) throw new Error('create failed '+created.body);
   const parsed = JSON.parse(created.body) as CreateResp;
+  if (debug) console.log('SMOKE_DEBUG initial requestId', parsed.requestId);
   if (!parsed.token || !parsed.requestId) throw new Error('invalid create response');
   if (parsed.status !== 'ready_for_approval' && parsed.status !== 'awaiting_personas') {
     throw new Error('unexpected initial status '+parsed.status);
   }
-  // If personas gating appears, just exit success for now (basic smoke still reached create).
   if (parsed.status === 'awaiting_personas') {
     console.log('Smoke: request created but awaiting personas (treating as success)');
     return;
@@ -79,7 +86,8 @@ async function main() {
     .map(s=>s.trim().toLowerCase())
     .filter(Boolean);
 
-  const metricsBefore = await fetchMetrics(port);
+  // metricsBefore now refers to baseline from before any creates
+  const metricsBefore = metricsBaseline;
 
   let approveCount=0, denyCount=0, expireCount=0; // track expectations
 
@@ -172,7 +180,17 @@ async function main() {
   if (createdActions.length) {
     const beforeReq = extractCounterByActions(metricsBefore,'approval_requests_total',createdActions) ?? 0;
     const afterReq = extractCounterByActions(metricsAfter,'approval_requests_total',createdActions) ?? 0;
+    if (debug) {
+      console.log('SMOKE_DEBUG approval_requests_total delta check', { createdActions, beforeReq, afterReq });
+      const relevantLinesAfter = metricsAfter.split(/\n/).filter(l=>l.startsWith('approval_requests_total{') && createdActions.some(a=>l.includes(`action="${a}"`)));
+      console.log('SMOKE_DEBUG relevant after metric lines:', relevantLinesAfter);
+    }
     if (!(afterReq > beforeReq)) {
+      // Dump a focused diff to help diagnosis
+      const relevantBefore = metricsBefore.split(/\n/).filter(l=>l.startsWith('approval_requests_total{'));
+      const relevantAfter = metricsAfter.split(/\n/).filter(l=>l.startsWith('approval_requests_total{'));
+      console.error('SMOKE_DEBUG full before lines for approval_requests_total:', relevantBefore);
+      console.error('SMOKE_DEBUG full after  lines for approval_requests_total:', relevantAfter);
       throw new Error(`metric approval_requests_total did not increase for actions ${createdActions.join(',')} (before=${beforeReq} after=${afterReq})`);
     }
   }
