@@ -129,8 +129,19 @@ async function main() {
     { name:'expired_total', mustIncreaseIf: expireCount },
   ];
   function extractCounter(text:string, metric:string): number | undefined {
-    const line = text.split(/\n/).find(l=>l.startsWith(metric+' '));
-    if(!line) return undefined; const parts = line.trim().split(/\s+/); const val = parseFloat(parts[1]); return isNaN(val)? undefined: val;
+    // Prometheus exposition lines may look like:
+    // metric_name{label="value"} 123 or metric_name 123 (no labels)
+    // We sum all series for the metric to get a total delta.
+    const lines = text.split(/\n/).filter(l => l.startsWith(metric+' ') || l.startsWith(metric+'{'));
+    if (!lines.length) return undefined;
+    let sum = 0;
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 2) continue;
+      const v = parseFloat(parts[1]);
+      if (!isNaN(v)) sum += v;
+    }
+    return sum;
   }
   for (const spec of specs) {
     if (spec.mustIncreaseIf>0) {
