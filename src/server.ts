@@ -521,6 +521,12 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
           audit('persona_ack_ready',{ request_id: record.id, actor: userId, persona, status: record.status });
         }
         try { audit('persona_ack_stage',{ request_id: record.id, actor: userId, persona, state: record.persona_state[persona], all_ack: allAck, status: record.status }); } catch {/* ignore */}
+        // Optimistic mutation for any other live references returned earlier (memory + proxy path): attempt to overlay onto possible cached snapshot.
+        try {
+          // For in-memory store, other references share object identity; for redis we rely on proxy auto-persist.
+          // We still emit an overlay event for diagnostics.
+          audit('persona_ack_optimistic_overlay',{ request_id: record.id, persona, all_ack: allAck });
+        } catch {/* ignore */}
       }
     }
     if (result && !result.ok) {

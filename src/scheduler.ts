@@ -36,6 +36,7 @@ export function startScheduler(intervalOverride?: number) {
                 audit('request_escalated',{ request_id: r.id });
               });
               incCounter('escalations_total',{ action: r.action });
+              try { if ((Store as any).updateFields) { await (Store as any).updateFields(r.id, { escalation_fired: true, escalated_at: r.escalated_at, min_approvals: r.min_approvals }); } } catch {/* ignore */}
               await postEscalationNotice(r);
               broadcastForRequestId(r.id);
             }
@@ -65,6 +66,7 @@ export function startScheduler(intervalOverride?: number) {
             const created = new Date(r.created_at).getTime();
             observeDecisionLatency((now - created)/1000, { action: r.action, outcome: 'expired' });
           }
+          try { if ((Store as any).updateFields) { await (Store as any).updateFields(r.id, { status: 'expired', decided_at: r.decided_at }); } } catch {/* ignore */}
           await updateRequestMessage(r);
           broadcastForRequestId(r.id);
           continue;
