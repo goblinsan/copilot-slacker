@@ -532,7 +532,7 @@ These are intentional scope trims for the pilot; see `docs/project-plan.md` §§
 
 * In-memory store (default) loses all active requests on restart. Use Redis (`STORE_BACKEND=redis` + `REDIS_URL`) for durability / multi-instance.
 * Horizontal scaling without Redis is unsupported (state not shared across processes).
-* Personas: gating flow exists but final MVP enable/ defer decision pending (see `docs/project-plan.md` §7); examples may omit personas for simplicity.
+* Personas: minimal gating enabled (ack checklist); missing features: revocation (un-ack), persona groups/aliases, ack latency metrics.
 * Slack delivery: basic retry/backoff only; no adaptive rate limit metrics or alerting yet.
 * Single escalation notice per request; no re-escalation cadence.
 * Load baseline collected locally only (no production SLO yet); see performance snippet below.
