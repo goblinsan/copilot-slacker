@@ -10,6 +10,8 @@ import { withSpan } from './tracing.js';
  * Interval precedence: explicit param > env SCHEDULER_INTERVAL_MS > default (5000ms).
  */
 let timer: NodeJS.Timeout | undefined;
+// Expose last interval ms for test observability
+let _intervalMs: number | undefined;
 
 export function startScheduler(intervalOverride?: number) {
   if (timer) return; // idempotent
@@ -17,13 +19,17 @@ export function startScheduler(intervalOverride?: number) {
   if (process.env.VITEST === '1' && !intervalOverride && !process.env.SCHEDULER_INTERVAL_MS) {
     base = 500; // accelerate in tests for deterministic expiration/escalation/tracing
   }
-  const interval = base;
+  const interval = base; _intervalMs = interval;
   timer = setInterval(async () => {
-    if (!Store.listOpenRequests) return; // backend may not support listing
-    try {
-      const open = await Store.listOpenRequests();
-      const now = Date.now();
-      for (const r of open) {
+    await __runSchedulerIteration();
+  }, interval);
+}
+
+async function __runSchedulerCore(nowOverride?: number) {
+  if (!Store.listOpenRequests) return; // backend may not support listing
+  const open = await Store.listOpenRequests();
+  const now = nowOverride ?? Date.now();
+  for (const r of open) {
         const exp = new Date(r.expires_at).getTime();
         // Fire escalation first (single-fire) if threshold passed but not terminal/expired
   if (!r.escalation_fired && r.escalate_at && !['approved','denied','expired'].includes(r.status)) {
@@ -75,11 +81,17 @@ export function startScheduler(intervalOverride?: number) {
           broadcastForRequestId(r.id);
           continue;
         }
-      }
-    } catch (e) {
-      audit('scheduler_error',{ error: String(e) });
-    }
-  }, interval);
+  }
+}
+
+async function __runSchedulerIteration(nowOverride?: number){
+  try { await __runSchedulerCore(nowOverride); } catch (e) { audit('scheduler_error',{ error: String(e) }); }
 }
 
 export function stopScheduler() { if (timer) { clearInterval(timer); timer = undefined; } }
+
+// Test-only explicit single iteration trigger for deterministic span emission
+export async function __TEST_schedulerTick(){ if (process.env.VITEST==='1') { await __runSchedulerIteration(); } }
+// Deterministic run at a provided timestamp (ms since epoch) for tests
+export async function __TEST_runSchedulerAt(nowMs: number){ if (process.env.VITEST==='1') { await __runSchedulerIteration(nowMs); } }
+export function __TEST_schedulerInterval(){ return _intervalMs; }

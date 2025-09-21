@@ -6,6 +6,7 @@ import { loadPolicy, evaluate, getPolicy, reloadPolicy } from './policy.js';
 import { Store } from './store.js';
 import { postRequestMessage, verifySlackSignature, updateRequestMessage, slackClient } from './slack.js';
 import { applyApproval, applyDeny, getOptimisticActors } from './approval.js';
+import { observeDecisionLatency } from './metrics.js';
 import { startScheduler } from './scheduler.js';
 import crypto from 'node:crypto';
 import { audit } from './log.js';
@@ -533,6 +534,16 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       return json(res,200,{ response_type:'ephemeral', text: errorMessage(result.error) });
     }
     if (result?.ok || personaChanged) {
+      // Ensure latency histogram recorded exactly once (idempotent) when request just turned terminal approved.
+      try {
+        if (result?.ok && record.status === 'approved' && !(record as any).__lat_obs) {
+          if (record.created_at && record.decided_at) {
+            const latencySec = (new Date(record.decided_at).getTime() - new Date(record.created_at).getTime())/1000;
+            observeDecisionLatency(latencySec,{ action: record.action, outcome: 'approved' });
+            (record as any).__lat_obs = true;
+          }
+        }
+      } catch {/* ignore */}
       broadcastForRequestId(record.id);
       try { await updateRequestMessage(record); } catch (e) { audit('slack_update_error',{ error:String(e), request_id: record.id }); }
     }

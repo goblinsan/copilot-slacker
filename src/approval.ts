@@ -408,7 +408,10 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
     audit('approval_post_finalize_async', { request_id: req.id, actor, count: req.approvals_count });
     incCounter('approvals_total',{ action: req.action });
     const latencySec = (new Date(req.decided_at).getTime() - new Date(req.created_at).getTime())/1000;
-    observeDecisionLatency(latencySec,{ action: req.action, outcome: 'approved' });
+    if (!(req as any).__lat_obs) {
+      observeDecisionLatency(latencySec,{ action: req.action, outcome: 'approved' });
+      (req as any).__lat_obs = true;
+    }
     if ((Store as any).updateFields) {
       try { Promise.resolve((Store as any).updateFields(req.id, { status: 'approved', approvals_count: req.approvals_count, decided_at: req.decided_at })).catch(()=>{}); } catch {/* ignore */}
     }
