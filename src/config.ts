@@ -19,6 +19,8 @@ export interface Config {
   retentionSweepIntervalSec: number;
   retentionMaxAgeSec: number;
   retentionArchiveDir: string;
+  pilotMode: boolean;
+  pilotMaxOpenRequests: number;
 }
 
 function num(envVal: string | undefined, def: number, opts?: { min?: number; max?: number }): number {
@@ -66,7 +68,9 @@ export function loadConfig(): Config {
     overrideMaxChars: num(process.env.OVERRIDE_MAX_CHARS, 2000, { min: 100, max: 20000 }),
     retentionSweepIntervalSec: num(process.env.RETENTION_SWEEP_INTERVAL_SEC, 60, { min: 5, max: 3600 }),
     retentionMaxAgeSec: num(process.env.RETENTION_MAX_AGE_SEC, 86400, { min: 60, max: 86400 * 30 }),
-    retentionArchiveDir: process.env.RETENTION_ARCHIVE_DIR || 'archive'
+    retentionArchiveDir: process.env.RETENTION_ARCHIVE_DIR || 'archive',
+    pilotMode: bool(process.env.PILOT_MODE, false),
+    pilotMaxOpenRequests: num(process.env.PILOT_MAX_OPEN_REQUESTS, 25, { min:1, max:1000 })
   };
 
   return cfg;

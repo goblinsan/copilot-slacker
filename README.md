@@ -12,25 +12,8 @@ Slack-based approval gate for LLM / agent risky operations (dependency install, 
 * Audit logging (stdout JSON lines).
 * Pluggable store (in-memory; replace with Redis adapter).
 
-## Quickstart (Local)
-```bash
-git clone <repo>
-cd copilot-slacker
-cp .env.example .env
-npm install
-npm run dev
-```
-
-In another terminal (simulate agent):
-```bash
-curl -X POST http://localhost:3000/api/guard/request \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "action":"npm_install",
-    "params":{"packages":["lodash@^4.17.21"]},
-    "meta": {"origin":{"repo":"acme/web","branch":"feature/x"},"requester":{"id":"agent-1","source":"agent"},"justification":"Security patch"}
-  }'
-```
+## Quickstart
+See `docs/quickstart.md` for an end-to-end local run including simulated Slack approval.
 
 ### Slack App Setup
 1. Create Slack App (from scratch) → App-Level Tokens (optional if using Web API only).
@@ -71,12 +54,10 @@ GUARD_BASE_URL=http://localhost:3000
 | Timeouts | Placeholder fields; scheduler not yet implemented (future) |
 | Policies | YAML loaded and evaluated (`policy.ts`) |
 
-### TODO / Next Steps
-* Implement persona checkbox interactions & enabling Approve only when acked.
-* Add Redis adapter & TTL expiry sweep.
-* Add scheduler for timeout + escalation.
-* SSE streaming endpoint (currently simple long-poll).
-* Robust approval duplication prevention & user ID allowlist enforcement.
+### Additional Documentation
+* `docs/sse-example.md` – Streaming state changes with SSE.
+* `docs/persona-flow.md` – Persona acknowledgement lifecycle.
+* `docs/lineage.md` – Re-request (lineage) flow concepts.
 
 ## Testing
 ```bash
@@ -130,41 +111,7 @@ scrape_configs:
 Dashboards should chart request throughput, decision latency histogram (P50/P95 derived), and escalation frequency per action.
 
 ## SSE Streaming (Real-Time Updates)
-
-After creating a request the creator receives a `token` (response of `/api/guard/request`). Use the SSE endpoint to stream live state transitions until the request becomes terminal (`approved`, `denied`, or `expired`). A heartbeat event is sent every ~25 seconds to keep idle connections alive.
-
-Endpoint:
-```
-GET /api/guard/wait-sse?token=<TOKEN>
-```
-
-Example with curl:
-```
-curl -N "http://localhost:3000/api/guard/wait-sse?token=$TOKEN"
-```
-
-Sample event flow:
-```
-event: state
-data: {"status":"ready_for_approval","approvers":[]}
-
-event: state
-data: {"status":"approved","approvers":["U456"],"decidedAt":"2025-09-20T02:43:20.156Z"}
-```
-
-Node client snippet:
-```js
-import EventSource from 'eventsource';
-const es = new EventSource(`http://localhost:3000/api/guard/wait-sse?token=${token}`);
-es.addEventListener('state', ev => {
-  const data = JSON.parse(ev.data);
-  console.log('state update', data);
-  if(['approved','denied','expired'].includes(data.status)) es.close();
-});
-es.addEventListener('heartbeat', () => {/* optional keep-alive */});
-```
-
-Fallback (if proxies strip SSE): poll `GET /api/guard/wait?token=<TOKEN>` every few seconds or POST to the same path to retrieve current state.
+See `docs/sse-example.md` for details and client patterns.
 
 ## Parameter Overrides
 When a policy action defines:

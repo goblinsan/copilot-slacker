@@ -1,0 +1,17 @@
+version: '3.9'
+services:
+  approval:
+    image: ghcr.io/example/approval-service:latest
+    environment:
+      NODE_ENV: production
+      STORE_BACKEND: memory
+      PILOT_MODE: 'true'
+      PILOT_MAX_OPEN_REQUESTS: '50'
+      POLICY_PATH: .agent/policies/guards.yml
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-test_secret}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-xoxb-test}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../.agent/policies:/app/.agent/policies:ro
+    command: ["node","dist/server.js"]

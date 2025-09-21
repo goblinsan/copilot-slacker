@@ -1,7 +1,7 @@
 # Approval Service Project Plan
 
 Status: Draft  
-Last Updated: 2025-09-20 (completed items 13,14,15,16,17,37,39,40,41; readiness improvements & future hardening backlog appended)
+Last Updated: 2025-09-21 (added deterministic scheduler hook & tracing span test hardening (#37); shared test helpers consolidated; Docker build context fixed)
 
 ## 1. Overview
 This plan tracks remaining work to take the Approval Service from scaffolding to a production-ready, secure, observable, and operable system.
@@ -132,6 +132,59 @@ Enhanced `release.yml` to generate a CycloneDX SBOM (anchore/sbom-action) for th
 
 ### Future Enhancements Backlog
 Outlined items 42–50 targeting operational hardening: multi-architecture distribution, distroless runtime to shrink attack surface, supply chain integrity (SBOM, provenance, signing), continuous vulnerability posture (scheduled scans & dependency automation), resilience (Redis HA test), observability gap closure (Slack 429 metrics), and incident process maturity (timeline template).
+
+### Newly Identified Refinement Candidates (Post #37 CI Hardening)
+| Ref | Title | Description | Rationale |
+|-----|-------|-------------|-----------|
+| R1 | Deterministic scheduler unit tests | Add pure function tests for escalation/expiration decision logic (bypassing store) | Further reduce regression surface & speed feedback |
+| R2 | Unified test status polling helper | Replace ad-hoc `waitFor` patterns with a shared `waitForStatus(token,status)` | Consistency & less timing fragility |
+| R3 | Approval helper abstraction | Add `approveRequest(port, id, userId?)` with signature generation | Reduce boilerplate in security & SSE tests |
+| R4 | Test documentation (`TESTING.md`) | Document deterministic hooks: `__TEST_runSchedulerAt`, retention sweep, direct approval path | Contributor onboarding & consistency |
+| R5 | Slack simulation mode | Provide an in-memory Slack client shim to emit spans/metrics without real API | More predictable tests without network mocking |
+| R6 | Metrics shape verification tests | Golden file snapshot of `/metrics` for a seeded scenario | Catch unintended metric label/value regressions |
+| R7 | Policy schema validation CLI | `npm run policy:validate` to preflight changes locally/CI | Prevent misconfig deploys |
+| R8 | Structured changelog generation | Automate release notes from merged PR conventional commits | Faster iteration & release hygiene |
+| R9 | mTLS integration test | End-to-end test hitting HTTPS server with client cert | Validate optional security path before prod enable |
+| R10 | Load harness scenario expansion | Add denial + timeout + persona ack mix & Slack latency simulation | Closer to production behavior under stress |
+
+### Deferred / To Re-Evaluate
+| Item | Reason for Deferral | Revisit Criteria |
+|------|--------------------|------------------|
+| 29 (Distributed replay/rate limit cache) | Single-instance acceptable for current scale | When horizontal scaling planned |
+| 45 (Image signing) | SBOM & provenance prioritized first | Security review window or pre GA |
+| 46 (Weekly vuln re-scan) | Manual scans sufficient short-term | After first external pilot |
+| 47 (Dependency automation) | Low churn dependencies presently | Growing dependency graph / monthly drift |
+| 48 (Redis HA / failover test) | Early stage, single node ok | Staging cluster readiness |
+| 49 (Slack 429 metrics & alerts) | Basic queue covers immediate need | Observed sustained 429 bursts |
+| 50 (Incident timeline template) | Runbook baseline established | First real incident / chaos exercise |
+
+## 11. Proposed Next Step Toward Live Testing
+Goal: Enable a limited staging pilot with real Slack workspace while minimizing blast radius.
+
+Recommended Immediate Iteration ("Pilot Readiness Sprint"):
+1. Complete Item 18 (Docs polish): add quickstart, SSE example curl, persona flow screenshots, lineage example stub.
+2. Implement Refinements R1, R2, R3 (fast wins that stabilize test surface & developer UX).
+3. Add basic staging deployment manifest (K8s or docker-compose) referencing current image + minimal secrets template.
+4. Introduce `PILOT_MODE=true` feature flag (optional) to:
+	- Force stricter logging redaction
+	- Enable verbose audit for all decisions
+	- Limit max concurrent open requests (configurable) to reduce risk
+5. Run a supervised pilot: 5–10 real requests exercising approval, persona ack, escalation, and expiration paths.
+6. Capture metrics & trace sample; document baseline dashboard JSON export.
+
+Pilot Exit Criteria:
+* No unhandled errors in logs over pilot window.
+* All four terminal paths observed (approved, denied, expired, override applied/rejected).
+* Latency histogram populated with >5 samples per outcome label.
+* No Slack 429 warnings; escalation posted exactly once per request requiring it.
+* Docs quickstart followed by new engineer without assistance.
+
+Post-Pilot Immediate Follow-ups:
+* Decide priority between distributed replay cache (Item 29) vs. signing (Item 45) based on scaling outlook.
+* Begin adding metric alert thresholds (expired_total anomaly, escalation latency).
+* Schedule R10 load harness expansion.
+
+---
 
 ## 5. Acceptance Criteria (Roll-Up)
 | Category | Criteria |

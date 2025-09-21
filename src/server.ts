@@ -219,6 +219,17 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
   const evalResult = currentPolicy ? evaluate(parsed.action, currentPolicy) : undefined;
     if (!evalResult) return json(res,403,{error:'policy_denied'});
     span.setAttribute?.('action', parsed.action);
+    // Pilot mode: enforce capacity limit on active open requests
+    if (cfg.pilotMode && Store.listOpenRequests) {
+      try {
+        const open = await Store.listOpenRequests();
+        const active = open.filter(r => !['approved','denied','expired'].includes(r.status)).length;
+        if (active >= cfg.pilotMaxOpenRequests) {
+          audit('pilot_cap_reject',{ active, cap: cfg.pilotMaxOpenRequests });
+          return json(res,429,{ error:'pilot_capacity_reached' });
+        }
+      } catch {/* ignore capacity calc errors */}
+    }
     const token = crypto.randomUUID();
     const nowMs = Date.now();
     const expiresAt = new Date(nowMs + evalResult.timeoutSec * 1000).toISOString();
@@ -261,6 +272,9 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       }).catch(err => audit('slack_post_error',{error:String(err)}));
     }
   audit('request_created',{id:rec.id, action:rec.action});
+  if (cfg.pilotMode) {
+    audit('pilot_request_created',{ id: rec.id, action: rec.action, status: rec.status });
+  }
   incCounter('approval_requests_total',{ action: rec.action });
   // Fire any SSE listeners waiting on this token
   // (Token is only known to creator, but ensure consistency if listener attached quickly)

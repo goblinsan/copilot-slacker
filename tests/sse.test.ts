@@ -2,30 +2,13 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startServer, getServer } from '../src/server.js';
 import { startScheduler, stopScheduler } from '../src/scheduler.js';
 import http from 'node:http';
-import { createGuardRequest } from './test-helpers.js';
+import { createGuardRequest, approveRequest } from './test-helpers.js';
 
 let port: number;
 
 async function createRequest(action='rerequest_demo'): Promise<{token:string,id:string}> {
   const r = await createGuardRequest(port, { action, params:{}, meta:{ origin:{repo:'x'}, requester:{id:'u', source:'agent'}, justification:'test ok'} });
   return { token: r.token, id: r.requestId } as any;
-}
-
-function sign(body: string, ts: string) {
-  const crypto = require('node:crypto');
-  const base = `v0:${ts}:${body}`;
-  const hmac = crypto.createHmac('sha256', process.env.SLACK_SIGNING_SECRET || 'test_secret').update(base).digest('hex');
-  return `v0=${hmac}`;
-}
-
-function approve(id: string, user='U456') {
-  return new Promise<void>((resolve,reject)=>{
-    const urlBody = new URLSearchParams({ payload: JSON.stringify({ user:{ id:user }, actions:[{ action_id:'approve', value:id }] }) }).toString();
-    const ts = Math.floor(Date.now()/1000).toString();
-    const sig = sign(urlBody, ts);
-    const req = http.request({ port, path:'/api/slack/interactions', method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded','x-slack-request-timestamp':ts,'x-slack-signature':sig}},res=>{res.on('data',()=>{});res.on('end',()=>resolve());});
-    req.on('error',reject); req.write(urlBody); req.end();
-  });
 }
 
 describe('SSE endpoint', () => {
@@ -64,7 +47,7 @@ describe('SSE endpoint', () => {
       });
       req.on('error',reject); req.end();
   // Approve only after first state event observed
-  const approveAfterFirst = () => { approve(id).catch(reject); };
+  const approveAfterFirst = () => { approveRequest(port, id, 'U456').catch(reject); };
   const origPush = events.push.bind(events);
   (events as any).push = (val: any) => { const r = origPush(val); if(val.event==='state' && (!/approved|denied|expired/.test(val.data||''))) { setTimeout(approveAfterFirst,100); } return r; };
       // Fallback timeout in case no terminal
