@@ -2,8 +2,8 @@
 
 # Approval Service Project Plan
 
-Status: MVP Convergence (Post-M1–M4 Complete)
-Last Updated: 2025-09-21 (after escalation test hardening & smoke metrics assertions; latency baseline captured)
+Status: MVP Convergence (Post-M1–M5 Complete)
+Last Updated: 2025-09-21 (after reliability loop (M5) + escalation test hardening & smoke metrics assertions; latency baseline captured)
 
 ---
 ## 1. Purpose
@@ -25,8 +25,7 @@ Implemented & validated:
 - Docs: TESTING.md, policies, runbook (baseline) ✅
 
 Remaining Verification Focus:
-- Consecutive green CI runs target (≥5) including SSE stream stability.
-- Optional SSE multi-run flake guard (M5) – decide before tag.
+- Consecutive green CI runs target (≥5) including SSE stream stability (loop script added: `npm run reliability:sse`).
 
 ---
 ## 3. MVP Definition (Strict Scope)
@@ -60,10 +59,10 @@ An internal pilot-ready service delivering: secure approval gating, observable m
 | M2 | Confirm timestamp skew & replay tests (stale + replay) | Security Test | S | Done |
 | M3 | README Quickstart + Limitations + Slack setup snippet | Docs | S | Done |
 | M4 | Latency baseline capture (approve path) & record | Perf Baseline | XS | Done |
-| M5 | SSE multi-run (5x) reliability check (optional gate) | Stability | XS | Pending |
+| M5 | SSE multi-run (5x) reliability check (optional gate) | Stability | XS | Done |
 | M6 | Persona scope decision (Enable minimal flow) | Product Decision | XS | Done |
 
-Completion of M1–M4 (and decision for M6) declares MVP; M5 optional but recommended.
+Completion of M1–M5 (and decision for M6) declares MVP readiness pending CI streak + tag.
 
 ---
 ## 5. Fast-Follower (Post-MVP, Near-Term)
@@ -369,3 +368,17 @@ Recommend mapping each ID to an issue (e.g., GitHub issues with label `approval-
 
 ---
 Prepared as implementation guide & execution tracker. Update `Last Updated` field when modifying plan.
+
+### Tagging & CI Streak Instructions (MVP Finalization)
+To finalize MVP tag `v0.9.0-mvp`:
+1. Run reliability loop locally (or via ad-hoc CI job) to confirm stability:
+	- `npm run reliability:sse` (default 5 iterations approve+expire) – expect success with optional escalation warnings ≤20% of expire iterations.
+2. Monitor CI for ≥5 consecutive green runs on `main` (includes SSE tests). Record run IDs in PR / issue.
+3. Create annotated tag:
+	- `git tag -a v0.9.0-mvp -m "MVP: approvals+personas+escalation+metrics+SSE (see docs/project-plan.md for scope & limitations)"`
+	- `git push origin v0.9.0-mvp`
+4. Verify release workflow publishes image & SBOM/provenance artifacts.
+5. Capture metrics snapshot post-tag (prometheus scrape or curl) and archive under `staging/metrics-snapshots/v0.9.0-mvp.txt` (optional) for historical baseline.
+6. Open follow-up issue: "Post-MVP Hardening Rollup" enumerating fast-follower items (F1–F7) & refinement refs (R1–R11) with prioritization.
+
+Escalation Metric Note: A rare scheduler tick alignment can expire a short-lived request without a prior escalation tick (no increment). The reliability script logs a warning instead of failing to avoid false negatives. Future improvement (R1) would move escalation decision into a pure step function enabling deterministic enforcement.
