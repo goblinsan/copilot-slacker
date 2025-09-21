@@ -145,11 +145,37 @@ async function main() {
   }
   interface MetricDeltaSpec { name:string; mustIncreaseIf:number; }
   const specs: MetricDeltaSpec[] = [
-    { name:'approval_requests_total', mustIncreaseIf: approveCount+denyCount+expireCount },
     { name:'approvals_total', mustIncreaseIf: approveCount },
     { name:'denies_total', mustIncreaseIf: denyCount },
     { name:'expired_total', mustIncreaseIf: expireCount },
   ];
+
+  // For approval_requests_total, calculate delta by summing only lines matching actions we created
+  const createdActions = [
+    ...(approveCount? ['rerequest_demo']:[]),
+    ...(denyCount? ['rerequest_demo']:[]),
+    ...(expireCount? ['expire_fast_demo']:[])
+  ];
+  function extractCounterByActions(text:string, metric:string, actions:string[]): number | undefined {
+    const lines = text.split(/\n/).filter(l => l.startsWith(metric+'{'));
+    if (!lines.length) return undefined;
+    let sum = 0; let matched = 0;
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/); if (parts.length < 2) continue;
+      const value = parseFloat(parts[1]); if (isNaN(value)) continue;
+      const m = line.match(/action="([^"]+)"/);
+      if (m && actions.includes(m[1])) { sum += value; matched++; }
+    }
+    if (!matched) return 0; // none of our actions present yet
+    return sum;
+  }
+  if (createdActions.length) {
+    const beforeReq = extractCounterByActions(metricsBefore,'approval_requests_total',createdActions) ?? 0;
+    const afterReq = extractCounterByActions(metricsAfter,'approval_requests_total',createdActions) ?? 0;
+    if (!(afterReq > beforeReq)) {
+      throw new Error(`metric approval_requests_total did not increase for actions ${createdActions.join(',')} (before=${beforeReq} after=${afterReq})`);
+    }
+  }
   for (const spec of specs) {
     if (spec.mustIncreaseIf>0) {
       const beforeVal = extractCounter(metricsBefore, spec.name);
