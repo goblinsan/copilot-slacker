@@ -339,7 +339,7 @@ end_to_end_ms: count=500 p50=4.30 p90=6.22 p95=7.10 p99=8.95 max=10.45
 
 Interpretation:
 * Compare `end_to_end_ms` vs `create_ms` to estimate non-network processing overhead.
-* If adding personas or Slack posting in future tests, expect `end_to_end_ms` to increase; isolate HTTP vs business logic by examining the delta between create and approval operation percentiles.
+* If adding personas or Slack posting in future tests, expect `end_to_end_ms` to increase; isolate HTTP vs business logic by examining the delta between create and approval operation percentiles..
 
 Future Enhancements:
 * Optional ramp profiles (linear / step / spike).
