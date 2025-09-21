@@ -120,9 +120,29 @@ async function main() {
     expireCount++;
   }
 
-  // Small delay to allow any async persistence / metric increments queued in microtasks.
-  await new Promise(r=>setTimeout(r,40));
-  const metricsAfter = await fetchMetrics(port);
+  // Allow metrics counters to settle; retry a few times if first read shows no change
+  const metricsSettleMs = Number(process.env.SMOKE_METRICS_SETTLE_MS || 40);
+  await new Promise(r=>setTimeout(r, metricsSettleMs));
+  let metricsAfter = await fetchMetrics(port);
+  // If approval_requests_total didn't increase yet but should have, retry up to 5 times with small backoff
+  function extractCounter(text:string, metric:string): number | undefined {
+    const lines = text.split(/\n/).filter(l => l.startsWith(metric+' ') || l.startsWith(metric+'{'));
+    if (!lines.length) return undefined;
+    let sum = 0; for (const line of lines) { const parts = line.trim().split(/\s+/); if (parts.length < 2) continue; const v = parseFloat(parts[1]); if (!isNaN(v)) sum += v; }
+    return sum;
+  }
+  const neededRequests = approveCount+denyCount+expireCount;
+  if (neededRequests>0) {
+    const beforeReq = extractCounter(metricsBefore,'approval_requests_total') || 0;
+    let afterReq = extractCounter(metricsAfter,'approval_requests_total') || 0;
+    let attempts = 0;
+    while (afterReq <= beforeReq && attempts < 5) {
+      await new Promise(r=>setTimeout(r, 60));
+      metricsAfter = await fetchMetrics(port);
+      afterReq = extractCounter(metricsAfter,'approval_requests_total') || 0;
+      attempts++;
+    }
+  }
   interface MetricDeltaSpec { name:string; mustIncreaseIf:number; }
   const specs: MetricDeltaSpec[] = [
     { name:'approval_requests_total', mustIncreaseIf: approveCount+denyCount+expireCount },
@@ -130,21 +150,6 @@ async function main() {
     { name:'denies_total', mustIncreaseIf: denyCount },
     { name:'expired_total', mustIncreaseIf: expireCount },
   ];
-  function extractCounter(text:string, metric:string): number | undefined {
-    // Prometheus exposition lines may look like:
-    // metric_name{label="value"} 123 or metric_name 123 (no labels)
-    // We sum all series for the metric to get a total delta.
-    const lines = text.split(/\n/).filter(l => l.startsWith(metric+' ') || l.startsWith(metric+'{'));
-    if (!lines.length) return undefined;
-    let sum = 0;
-    for (const line of lines) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 2) continue;
-      const v = parseFloat(parts[1]);
-      if (!isNaN(v)) sum += v;
-    }
-    return sum;
-  }
   for (const spec of specs) {
     if (spec.mustIncreaseIf>0) {
       const beforeVal = extractCounter(metricsBefore, spec.name);
