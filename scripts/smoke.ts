@@ -79,7 +79,7 @@ async function main() {
     .map(s=>s.trim().toLowerCase())
     .filter(Boolean);
 
-  const metricsBefore = want.includes('metrics') ? await fetchMetrics(port) : await fetchMetrics(port);
+  const metricsBefore = await fetchMetrics(port);
 
   let approveCount=0, denyCount=0, expireCount=0; // track expectations
 
@@ -110,34 +110,38 @@ async function main() {
   }
 
   if (want.includes('expire')) {
-    // Create a request with very short timeout (use policy action rerequest_demo then patch expires_at via override endpoint if available; else use internal heuristic)
-    // Since we lack a direct API to set custom expires_at in create, simulate by using short timeout action if exists; fallback: wait for natural expiration not practical here.
-    // Strategy: create request then directly poll until approved/expired; if it remains non-terminal too long, treat as failure.
-    const expCreatePayload = { action:'rerequest_demo', params:{ foo:'bar' }, meta:{ origin:{ repo:'smoke/repo'}, requester:{ id:'U1', source:'slack'}, justification:'expire scenario' } };
+    const expCreatePayload = { action:'expire_fast_demo', params:{ foo:'bar' }, meta:{ origin:{ repo:'smoke/repo'}, requester:{ id:'U1', source:'slack'}, justification:'expire scenario' } };
     const eCreated = await httpJson(port,'/api/guard/request','POST', expCreatePayload);
     if (eCreated.code !== 200) throw new Error('expire create failed '+eCreated.body);
     const eParsed = JSON.parse(eCreated.body) as CreateResp;
-    // Instead of relying on scheduler timing (which may be long), we skip forcing expiration to avoid flakiness.
-    // Mark as skipped with warning for now; real implementation would allow passing a short timeout param.
-    console.log('Smoke: expire scenario placeholder (no fast expiration path exposed)');
+    const status = await waitStatus(port, eParsed.token, ['expired','approved','denied'], 15_000);
+    if (status !== 'expired') throw new Error('expected expired got '+status);
+    console.log('Smoke: expire scenario OK');
+    expireCount++;
   }
 
   const metricsAfter = await fetchMetrics(port);
-  // Basic metrics assertions (non-fatal if not found, but report)
-  function assertContains(label:string, content:string) {
-    if(!content.includes(label)) throw new Error('metrics missing '+label);
+  interface MetricDeltaSpec { name:string; mustIncreaseIf:number; }
+  const specs: MetricDeltaSpec[] = [
+    { name:'approval_requests_total', mustIncreaseIf: approveCount+denyCount+expireCount },
+    { name:'approvals_total', mustIncreaseIf: approveCount },
+    { name:'denies_total', mustIncreaseIf: denyCount },
+    { name:'expired_total', mustIncreaseIf: expireCount },
+  ];
+  function extractCounter(text:string, metric:string): number | undefined {
+    const line = text.split(/\n/).find(l=>l.startsWith(metric+' '));
+    if(!line) return undefined; const parts = line.trim().split(/\s+/); const val = parseFloat(parts[1]); return isNaN(val)? undefined: val;
   }
-  try {
-    assertContains('approval_requests_total', metricsAfter);
-    if (approveCount) assertContains('approvals_total', metricsAfter);
-    if (denyCount) assertContains('denies_total', metricsAfter);
-    // Histogram line example: decision_latency_seconds_bucket
-    assertContains('decision_latency_seconds_bucket', metricsAfter);
-    console.log('Smoke: metrics validation OK');
-  } catch (err:any) {
-    console.error('Smoke: metrics validation failed:', err.message || err);
-    throw err;
+  for (const spec of specs) {
+    if (spec.mustIncreaseIf>0) {
+      const beforeVal = extractCounter(metricsBefore, spec.name);
+      const afterVal = extractCounter(metricsAfter, spec.name);
+      if (beforeVal === undefined || afterVal === undefined) throw new Error('missing metric '+spec.name);
+      if (!(afterVal > beforeVal)) throw new Error('metric '+spec.name+' did not increase');
+    }
   }
+  if (!metricsAfter.includes('decision_latency_seconds_bucket')) throw new Error('missing decision_latency_seconds histogram');
+  console.log('Smoke: metrics delta validation OK');
 
   console.log('Smoke: completed scenarios ->', want.join(','));
 }
