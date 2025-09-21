@@ -32,10 +32,20 @@ describe('scheduler deterministic transitions', () => {
     // Patch the underlying record (in-memory store safe in test) to simulate an escalation scenario
     const { Store } = await import('../src/store.js');
     const rec: any = await Store.getById(requestId);
-    rec.escalate_at = futureEsc;
-    rec.expires_at = futureExp;
-    rec.escalation_channel = 'CESC';
-    rec.escalation_fired = false;
+    // Persist escalation timing fields using updateFields when supported to avoid Redis proxy persistence races.
+    if ((Store as any).updateFields) {
+      await (Store as any).updateFields(requestId, {
+        escalate_at: futureEsc,
+        expires_at: futureExp,
+        escalation_channel: 'CESC',
+        escalation_fired: false
+      });
+    } else {
+      rec.escalate_at = futureEsc;
+      rec.expires_at = futureExp;
+      rec.escalation_channel = 'CESC';
+      rec.escalation_fired = false;
+    }
 
     // Run scheduler exactly at escalation time
   await __TEST_runSchedulerAt(escMs);
