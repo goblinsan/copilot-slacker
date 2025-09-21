@@ -8,7 +8,7 @@
     "lint": "eslint . --ext .ts",
     "build": "tsc -p .",
     "build:dist": "rm -rf dist && tsc -p .",
-    "start:dist": "node dist/server.js",
+  "start:dist": "node dist/src/server.js",
     "docker:build": "docker build -t approval-service:local .",
     "docker:run": "docker run --rm -p 8080:8080 approval-service:local",
     "typecheck": "tsc -p . --noEmit",

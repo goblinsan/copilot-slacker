@@ -119,6 +119,37 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
     res.end(base + extra);
     return;
   }
+  // Lightweight status read endpoint (F8): GET /api/guard/status?requestId=UUID
+  // Returns minimal state for agents/extensions to rehydrate without holding the token capability.
+  if (req.method === 'GET' && req.url?.startsWith('/api/guard/status')) {
+    try {
+      const url = new URL(req.url, 'http://localhost');
+      const requestId = url.searchParams.get('requestId');
+      if (!requestId) { return json(res, 400, { error: 'missing_requestId' }); }
+      const record = await Store.getById(requestId);
+      if (!record) { return json(res, 404, { error: 'not_found' }); }
+      const approversPersisted = await Store.approvalsFor(record.id);
+      const optimistic = getOptimisticActors(record.id);
+      const approvers = Array.from(new Set([...(approversPersisted||[]), ...optimistic]));
+      const body = {
+        requestId: record.id,
+        action: record.action,
+        status: record.status,
+        approvalsCount: record.approvals_count,
+        minApprovals: record.min_approvals,
+        approvers,
+        requiredPersonas: record.required_personas,
+        personaState: record.persona_state,
+        createdAt: record.created_at,
+        expiresAt: record.expires_at,
+        decidedAt: (record as any).decided_at || null,
+        payloadHash: (record as any).payload_hash || null
+      };
+      return json(res, 200, body);
+    } catch (e: any) {
+      return json(res, 500, { error: 'status_error', detail: String(e?.message || e) });
+    }
+  }
   // Schema introspection endpoint (returns sanitized override schema for action)
   if (req.method === 'GET' && req.url?.startsWith('/api/schemas/')) {
     const action = decodeURIComponent(req.url.split('/').pop()||'');

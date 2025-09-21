@@ -27,7 +27,7 @@ jobs:
           STORE_BACKEND: memory
           PILOT_MODE: 'false'
         run: |
-          node dist/server.js &
+          node dist/src/server.js &
           echo $! > server.pid
           sleep 1
           curl -sf http://localhost:8080/healthz
