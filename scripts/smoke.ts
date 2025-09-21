@@ -19,18 +19,19 @@ function httpJson(port:number, path:string, method:string, body?:any, headers?:R
   });
 }
 
-async function approve(port:number, requestId:string, userId='USMOKE', signingSecret=process.env.SLACK_SIGNING_SECRET||'test_secret') {
-  const payloadObj = { type:'block_actions', user:{ id:userId }, actions:[{ action_id:'approve', value:requestId }] };
-  const payload = JSON.stringify(payloadObj);
+async function slackInteraction(port:number, requestId:string, actionId:'approve'|'deny', userId:string, signingSecret=process.env.SLACK_SIGNING_SECRET||'test_secret') {
+  const payloadObj = { type:'block_actions', user:{ id:userId }, actions:[{ action_id:actionId, value:requestId }] };
+  const json = JSON.stringify(payloadObj);
+  const form = new URLSearchParams({ payload: json });
+  const body = form.toString(); // Slack signs raw form body
   const ts = Math.floor(Date.now()/1000).toString();
-  const base = `v0:${ts}:${payload}`;
+  const base = `v0:${ts}:${body}`;
   const sig = 'v0=' + crypto.createHmac('sha256', signingSecret).update(base).digest('hex');
-  const form = new URLSearchParams({ payload });
   return new Promise<{code:number; body:string}>((resolve,reject)=>{
     const req = http.request({ port, path:'/api/slack/interactions', method:'POST', headers:{ 'Content-Type':'application/x-www-form-urlencoded','x-slack-request-timestamp':ts,'x-slack-signature':sig }}, res=>{
       let chunks=''; res.on('data',c=>chunks+=c); res.on('end',()=>resolve({code:res.statusCode||0, body:chunks}));
     });
-    req.on('error',reject); req.write(form.toString()); req.end();
+    req.on('error',reject); req.write(body); req.end();
   });
 }
 
@@ -62,11 +63,38 @@ async function main() {
     console.log('Smoke: request created but awaiting personas (treating as success)');
     return;
   }
-  const approveRes = await approve(port, parsed.requestId);
-  if (approveRes.code !== 200) throw new Error('approve call failed '+approveRes.body);
-  const status = await waitStatus(port, parsed.token, ['approved','denied','expired']);
-  if (status !== 'approved') throw new Error('terminal status not approved: '+status);
-  console.log('Smoke: approved successfully');
+  const scenariosArg = process.argv.find(a=>a.startsWith('--scenarios='));
+  const scenariosEnv = process.env.SMOKE_SCENARIOS;
+  const want = (scenariosArg? scenariosArg.split('=')[1] : scenariosEnv || 'approve')
+    .split(',')
+    .map(s=>s.trim().toLowerCase())
+    .filter(Boolean);
+
+  // Always run approve if included
+  if (want.includes('approve')) {
+    const approveUser = process.env.SMOKE_APPROVE_USER || process.env.SMOKE_USER || 'U123';
+  const approveRes = await slackInteraction(port, parsed.requestId, 'approve', approveUser);
+    if (approveRes.code !== 200) throw new Error('approve call failed '+approveRes.body);
+    const status = await waitStatus(port, parsed.token, ['approved','denied','expired']);
+    if (status !== 'approved') throw new Error('terminal status not approved: '+status);
+    console.log('Smoke: approve scenario OK');
+  }
+
+  // Optional deny scenario (create separate request to avoid conflicting transitions)
+  if (want.includes('deny')) {
+    const denyCreatePayload = { action:'rerequest_demo', params:{ foo:'bar' }, meta:{ origin:{ repo:'smoke/repo'}, requester:{ id:'U1', source:'slack'}, justification:'deny scenario' } };
+    const denyCreated = await httpJson(port,'/api/guard/request','POST', denyCreatePayload);
+    if (denyCreated.code !== 200) throw new Error('deny create failed '+denyCreated.body);
+    const denyParsed = JSON.parse(denyCreated.body) as CreateResp;
+    const denyUser = process.env.SMOKE_DENY_USER || process.env.SMOKE_USER || 'U456';
+    const denyRes = await slackInteraction(port, denyParsed.requestId, 'deny', denyUser);
+    if (denyRes.code !== 200) throw new Error('deny interaction failed '+denyRes.body);
+    const denyStatus = await waitStatus(port, denyParsed.token, ['denied','approved','expired']);
+    if (denyStatus !== 'denied') throw new Error('terminal status not denied: '+denyStatus);
+    console.log('Smoke: deny scenario OK');
+  }
+
+  console.log('Smoke: completed scenarios ->', want.join(','));
 }
 
 main().catch(err => { console.error('SMOKE_FAIL', err.message || err); process.exit(1); });
