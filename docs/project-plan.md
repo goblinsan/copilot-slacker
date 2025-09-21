@@ -75,6 +75,7 @@ Completion of M1–M5 (and decision for M6) declares MVP readiness pending CI st
 | F5 | Dependency automation (former #47) | Reduce drift & vuln window |
 | F6 | Redis HA / failover test (former #48) | Reliability maturity |
 | F7 | Incident timeline template (former #50) | Faster postmortems |
+| F8 | Lightweight read/status endpoint (`GET /api/guard/status?requestId=`) | Allow agents/extensions to rehydrate state without holding token; improves IDE + automation UX |
 
 ---
 ## 6. Deferred / Documented Limitations
