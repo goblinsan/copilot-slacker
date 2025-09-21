@@ -333,7 +333,7 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       const metaRaw = parsed.view.private_metadata;
       let meta: any = {}; try { meta = JSON.parse(metaRaw);} catch {}
       const requestId = meta.request_id;
-      const record = await Store.getById(requestId);
+  let record = await Store.getById(requestId);
       if(!record) return json(res,200,{});
       audit('override_stage',{ request_id: record.id, actor: parsed.user?.id, stage: 'loaded_record', status: record.status, count: record.approvals_count });
       span.setAttribute?.('request_id', record.id);
@@ -410,6 +410,30 @@ async function handler(req: http.IncomingMessage, res: http.ServerResponse) {
       audit('override_stage',{ request_id: record.id, actor: userId, stage: 'approval_returned', ok: approval.ok });
       if (!approval.ok) {
         return json(res,200,{ response_action:'errors', errors:{ _ : errorMessage(approval.error) } });
+      }
+      // If terminal approval reached (especially via async optimistic fast path), ensure canonical synchronization and persistence.
+      if ((approval as any).terminal) {
+        try {
+          // Re-fetch canonical object in case applyApproval mutated a different in-memory reference (async store pattern)
+          const fresh = await Store.getById(record.id);
+          if (fresh && fresh !== record) {
+            // If canonical differs, reconcile terminal fields
+            if (fresh.status !== record.status || fresh.approvals_count !== record.approvals_count) {
+              fresh.status = record.status;
+              fresh.approvals_count = record.approvals_count;
+              (fresh as any).decided_at = (record as any).decided_at;
+              audit('override_canonical_sync_after_approval',{ request_id: record.id, actor: userId, status: fresh.status, count: fresh.approvals_count });
+            }
+            record = fresh; // adopt canonical
+          }
+        } catch { /* ignore canonical sync errors */ }
+        if (Store.updateFields) {
+          try {
+            const snapshotStatus = record.status;
+            await Promise.resolve(Store.updateFields(record.id, { status: record.status, approvals_count: record.approvals_count, decided_at: (record as any).decided_at }));
+            audit('override_persist_sync',{ request_id: record.id, actor: userId, status: snapshotStatus, count: record.approvals_count });
+          } catch {/* ignore persistence failure */}
+        }
       }
       if (debug) {
         try {
