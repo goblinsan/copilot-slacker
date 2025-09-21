@@ -47,14 +47,14 @@ actions:
     timeoutSec: 300
     allowReRequest: true
     reRequestCooldownSec: 60
-    expire_fast_demo:
-      description: "Short timeout action for smoke expire scenario"
-      approvers:
-        allowSlackIds: ["U123", "U456"]
-        minApprovals: 1
-      timeoutSec: 8
-      escalation:
-        escalateBeforeSec: 4
+  expire_fast_demo:
+    description: "Short timeout action for smoke expire scenario"
+    approvers:
+      allowSlackIds: ["U123", "U456"]
+      minApprovals: 1
+    timeoutSec: 8
+    escalation:
+      escalateBeforeSec: 4
 routing:
   defaultChannel: "CPRIVATE123"
   dmFallbackUser: "U123"
