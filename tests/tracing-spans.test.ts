@@ -3,19 +3,10 @@ import { startServer, getServer } from '../src/server.js';
 import { startScheduler, stopScheduler, __TEST_runSchedulerAt } from '../src/scheduler.js';
 import { getCollectedSpans, resetCollectedSpans, initTracing, shutdownTracing } from '../src/tracing.js';
 import { updateRequestMessage, postEscalationNotice } from '../src/slack.js';
-import http from 'node:http';
+import { httpRequest, createGuardRequest } from './test-helpers.js';
 import { Store } from '../src/store.js';
 import { waitFor } from './utils/waitFor.js';
 
-function httpRequest(path: string, method='GET', body?: any, headers?: Record<string,string>): Promise<{code:number, body:string}> {
-  return new Promise((resolve,reject)=>{
-    const data = body ? JSON.stringify(body) : undefined;
-    const req = http.request({ port: serverPort, path, method, headers: { ...(data?{ 'Content-Type':'application/json','Content-Length':String(Buffer.byteLength(data)) }:{}), ...(headers||{}) } }, res=>{
-      let chunks=''; res.on('data',c=>chunks+=c); res.on('end',()=>resolve({code:res.statusCode||0, body:chunks}));
-    });
-    req.on('error',reject); if(data) req.write(data); req.end();
-  });
-}
 
 let serverPort: number;
 
@@ -37,17 +28,7 @@ describe('tracing spans (#37)', () => {
   it('emits key lifecycle spans', async () => {
     resetCollectedSpans();
     // Create request with short timeout & escalation
-    const createRes = await httpRequest('/api/guard/request','POST',{
-      action:'rerequest_demo',
-      params:{ foo:'bar' },
-      meta:{
-        origin:{ repo:'a/b' },
-        requester:{ id:'U1', source:'slack' },
-        justification:'trace test'
-      }
-    });
-    expect(createRes.code).toBe(200);
-    const token = JSON.parse(createRes.body).token;
+    const { token } = await createGuardRequest(serverPort);
 
     // Compress timing to force escalation + expiration quickly
     const rec = await Store.getByToken(token);

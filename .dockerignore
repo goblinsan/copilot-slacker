@@ -21,7 +21,6 @@ dist
 **/*.spec.ts
 **/*.test.ts
 scripts/load-sim.ts
-# Docs (not needed at runtime)
-docs
+# Docs are copied in build stage for completeness (schema & api); keep them in context
 # Local policy temp files
 tmp_policy_*.yml
