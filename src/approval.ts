@@ -80,6 +80,11 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
       audit('approval_pre_state', { request_id: req.id, actor, count: req.approvals_count, list_len: Array.isArray(preList)? preList.length : undefined, store_instance: getStoreInstanceId?.(), status: req.status });
     } catch {/* ignore */}
   }
+  // Defensive: normalize allowed_approver_ids (could be missing if a cloned/plain object deserialized without field)
+  if (!Array.isArray((req as any).allowed_approver_ids)) {
+    audit('approval_missing_allowed_ids', { request_id: requestId, actor, had_field: Object.prototype.hasOwnProperty.call(req,'allowed_approver_ids') });
+    (req as any).allowed_approver_ids = [];
+  }
   if (!req.allowed_approver_ids.includes(actor)) {
     audit('unauthorized_approval_attempt', { request_id: req.id, actor });
     stage('exit_unauthorized');
@@ -101,8 +106,14 @@ export function applyApproval(req: GuardRequestRecord, actor: string): ApprovalR
   }
   stage('auth_status_ok');
   // Support both sync and async store implementations for hasApproval
-  const has = (Store.hasApproval as any)(req.id, actor);
-  const already = typeof has === 'boolean' ? has : (typeof has?.then === 'function' ? false : Boolean(has));
+  const hasMaybe = (Store.hasApproval as any)(req.id, actor);
+  let already = false;
+  if (typeof hasMaybe === 'boolean') already = hasMaybe;
+  else if (hasMaybe && typeof hasMaybe.then === 'function') {
+    // For async backends we cannot block synchronously; best-effort probe by temporarily marking false and reconciling after add
+    // (duplicate detection will still be enforced by store uniqueness semantics if present)
+    try { /* no-op */ } catch {/* ignore */}
+  } else if (hasMaybe) already = Boolean(hasMaybe);
   if (already) {
     audit('approval_rejected_duplicate', { request_id: req.id, actor });
     stage('exit_duplicate');

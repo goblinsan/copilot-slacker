@@ -10,8 +10,8 @@ import { applyApproval } from '../src/approval.js';
 
 describe('approval divergence adoption', () => {
   beforeEach(() => { process.env.VITEST = '1'; __TEST_clearStore(); });
-  it('adopts canonical request and increments count when passed a cloned reference', () => {
-    const rec: any = Store.createRequest({
+  it('adopts canonical request and increments count when passed a cloned reference', async () => {
+    const rec: any = await Store.createRequest({
       token: 't1',
       action: 'demo',
       payload_hash: 'h',
@@ -38,7 +38,7 @@ describe('approval divergence adoption', () => {
     const result = applyApproval(clone, 'U1');
     expect(result.ok).toBe(true);
     // Canonical store record should reflect approval
-    const fresh: any = Store.getById(rec.id);
+  const fresh: any = await Store.getById(rec.id);
     expect(fresh?.approvals_count).toBe(1);
     expect(fresh?.status).toBe('approved');
   });

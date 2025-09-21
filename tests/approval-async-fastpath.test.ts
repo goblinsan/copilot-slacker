@@ -35,7 +35,7 @@ describe('approval async fast-path', () => {
   });
 
   it('finalizes approval with post_add_core_early when addApproval is async', async () => {
-    const rec: any = Store.createRequest({
+    const rec: any = await Store.createRequest({
       token: 't', action: 'x', payload_hash: 'h', redacted_params: {}, meta: { origin:{repo:'r'}, requester:{id:'U1',source:'slack'}, justification:'j' },
       status: 'ready_for_approval', min_approvals:1, approvals_count:0, required_personas:[], persona_state:{}, allowed_approver_ids:['U1'],
       expires_at: new Date(Date.now()+60000).toISOString(), escalate_at: undefined, escalation_channel: undefined, escalation_fired:false,
