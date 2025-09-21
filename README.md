@@ -13,7 +13,46 @@ Slack-based approval gate for LLM / agent risky operations (dependency install, 
 * Pluggable store (in-memory; replace with Redis adapter).
 
 ## Quickstart
-See `docs/quickstart.md` for an end-to-end local run including simulated Slack approval.
+Fast path to a local approval loop (minimal, in-memory). For a fuller walkthrough (including simulated signed Slack interaction) see `docs/quickstart.md`.
+
+1. Install deps:
+```bash
+npm install
+```
+2. Start dev server (pilot mode suppresses certain production validations):
+```bash
+PILOT_MODE=true SLACK_SIGNING_SECRET=test_secret SLACK_BOT_TOKEN=xoxb-test npm run dev
+```
+   Server listens on `:8080` (set `PORT` to change). Policy file defaults to `.agent/policies/guards.yml`.
+3. Create a demo request:
+```bash
+curl -s -X POST localhost:8080/api/guard/request \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "action": "demo",
+    "params": {"ref":"main"},
+    "meta": {"origin":{"repo":"org/repo"}, "requester":{"id":"U1","source":"slack"}, "justification":"deploy"}
+  }' | tee /tmp/req.json
+```
+4. Extract token & wait (polling):
+```bash
+TOKEN=$(jq -r '.token' /tmp/req.json)
+curl -s "localhost:8080/api/guard/wait?token=$TOKEN"
+```
+5. (Optional) Stream via SSE in another terminal:
+```bash
+curl -N "localhost:8080/api/guard/wait-sse?token=$TOKEN"
+```
+6. Simulate an approval (signed Slack interaction) – full command in `docs/quickstart.md` (§7). After approval the SSE stream closes.
+7. Run smoke scenarios (approve, deny, expire) and assert metrics deltas:
+```bash
+npx ts-node scripts/smoke.ts --scenarios=approve,deny,expire
+```
+8. View metrics:
+```bash
+curl -s localhost:8080/metrics | grep approval_requests_total
+```
+Next: integrate with your agent by POSTing `/api/guard/request` then polling `/api/guard/wait` (or using SSE) until terminal status.
 
 ### Slack App Setup
 1. Create Slack App (from scratch) → App-Level Tokens (optional if using Web API only).
@@ -109,6 +148,9 @@ scrape_configs:
 ```
 
 Dashboards should chart request throughput, decision latency histogram (P50/P95 derived), and escalation frequency per action.
+
+### Baseline Latency (Reference)
+Local in-memory baseline (see `docs/project-plan.md` §8): create HTTP P95 ≈ 68ms; approve end-to-end P95 ≈ 116ms (80 req / concurrency 40). Use only as a relative benchmark—production SLOs should incorporate network + Slack latency.
 
 ## SSE Streaming (Real-Time Updates)
 See `docs/sse-example.md` for details and client patterns.
@@ -484,6 +526,21 @@ Notes:
 4. Create request → Slack message posts
 5. Approve in Slack → request transitions to `approved`
 6. Decision latency histogram increments (verify scrape)
+
+## Limitations (MVP)
+These are intentional scope trims for the pilot; see `docs/project-plan.md` §§6 & 8 for full notes.
+
+* In-memory store (default) loses all active requests on restart. Use Redis (`STORE_BACKEND=redis` + `REDIS_URL`) for durability / multi-instance.
+* Horizontal scaling without Redis is unsupported (state not shared across processes).
+* Personas: gating flow exists but final MVP enable/ defer decision pending (see `docs/project-plan.md` §7); examples may omit personas for simplicity.
+* Slack delivery: basic retry/backoff only; no adaptive rate limit metrics or alerting yet.
+* Single escalation notice per request; no re-escalation cadence.
+* Load baseline collected locally only (no production SLO yet); see performance snippet below.
+* No multi-region failover / DR automation (manual runbook steps only).
+* Overrides governance enforces key & diff size limits but no per-field role-based restrictions yet.
+
+### Performance Snapshot
+Local load harness (in-memory, 80 requests / concurrency 40): create P95 ≈ 68ms, end-to-end approve P95 ≈ 116ms. Full details: `docs/project-plan.md` §8.
 
 ## License
 Proprietary (example scaffolding).

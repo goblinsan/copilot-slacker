@@ -30,10 +30,13 @@ async function __runSchedulerCore(nowOverride?: number) {
   const open = await Store.listOpenRequests();
   const now = nowOverride ?? Date.now();
   for (const r of open) {
-        const exp = new Date(r.expires_at).getTime();
+        // Parse expiration; if invalid treat as Infinity so escalation can still fire.
+        let exp = new Date(r.expires_at).getTime();
+        if (Number.isNaN(exp)) exp = Number.POSITIVE_INFINITY;
         // Fire escalation first (single-fire) if threshold passed but not terminal/expired
   if (!r.escalation_fired && r.escalate_at && !['approved','denied','expired'].includes(r.status)) {
           const escAt = new Date(r.escalate_at).getTime();
+            // Fire exactly at or after escAt provided we haven't reached expiration (unless expiration invalid -> Infinity)
             if (now >= escAt && now < exp) {
               r.escalation_fired = true;
               r.escalated_at = new Date().toISOString();
